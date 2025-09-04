@@ -1,0 +1,23 @@
+{
+  "name": "nimblephp/authorization",
+  "description": "Authorization for NimblePHP",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "NimblePHP\\Authorization\\": "src/"
+    }
+  },
+  "authors": [
+    {
+      "name": "Krzysztof Żyłka",
+      "email": "krzysztofzylka@yahoo.com"
+    }
+  ],
+  "require": {
+    "php": ">=8.2",
+    "nimblephp/framework": ">=0.3.3",
+    "krzysztofzylka/hash": "^2.0",
+    "nimblephp/migrations": ">=0.2.2"
+  }
+}
