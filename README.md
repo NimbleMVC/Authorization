@@ -29,7 +29,7 @@ AUTHORIZATION_COLUMN_PASSWORD=password
 AUTHORIZATION_COLUMN_ACTIVE=active
 ```
 
-### Programistyczna konfiguracja
+### Konfiguracja
 
 ```php
 use NimblePHP\Authorization\Config;
