@@ -7,7 +7,18 @@ use NimblePHP\Authorization\Authorization;
 use NimblePHP\Authorization\Exceptions\UnauthorizedException;
 
 /**
- * HasRole attribute - checks if user has specific role
+ * HasRole attribute - Checks if user has specific role
+ * 
+ * Applied to controller methods to verify the authenticated user has the specified role.
+ * If user doesn't have the role, UnauthorizedException is thrown.
+ * 
+ * Usage:
+ * ```php
+ * #[HasRole('admin')]
+ * public function adminPanel() { ... }
+ * ```
+ * 
+ * @package NimblePHP\Authorization\Attributes
  */
 #[Attribute(Attribute::TARGET_METHOD | Attribute::IS_REPEATABLE)]
 class HasRole
@@ -20,7 +31,7 @@ class HasRole
 
     /**
      * Construct HasRole attribute
-     * @param string $role
+     * @param string $role The role name to check
      */
     public function __construct(string $role)
     {
@@ -29,9 +40,9 @@ class HasRole
 
     /**
      * Handle the role check
-     * @param object $controller
+     * @param object $controller The controller instance
      * @return void
-     * @throws UnauthorizedException
+     * @throws UnauthorizedException If user doesn't have the role
      */
     public function handle(object $controller): void
     {

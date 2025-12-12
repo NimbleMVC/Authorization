@@ -12,10 +12,21 @@ use NimblePHP\Migrations\Exceptions\MigrationException;
 use NimblePHP\Migrations\Migrations;
 use Throwable;
 
+/**
+ * ServiceProvider class - Service provider for Authorization library integration
+ * 
+ * This class is responsible for:
+ * - Running database migrations for Authorization tables
+ * - Initializing the Authorization module in NimblePHP framework
+ * - Setting up required database schema on application update
+ * 
+ * @package NimblePHP\Authorization
+ */
 class ServiceProvider implements ServiceProviderUpdateInterface
 {
 
     /**
+     * Execute on application update - runs pending migrations
      * @return void
      * @throws DatabaseException
      * @throws NimbleException

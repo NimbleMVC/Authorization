@@ -7,7 +7,18 @@ use NimblePHP\Authorization\Authorization;
 use NimblePHP\Authorization\Exceptions\UnauthorizedException;
 
 /**
- * HasAllRoles attribute - checks if user has all of the specified roles
+ * HasAllRoles attribute - Checks if user has all of the specified roles
+ * 
+ * Applied to controller methods to verify the authenticated user has all of
+ * the specified roles. If user doesn't have all roles, UnauthorizedException is thrown.
+ * 
+ * Usage:
+ * ```php
+ * #[HasAllRoles('admin', 'superuser')]
+ * public function restrictedAction() { ... }
+ * ```
+ * 
+ * @package NimblePHP\Authorization\Attributes
  */
 #[Attribute(Attribute::TARGET_METHOD)]
 class HasAllRoles
@@ -20,7 +31,7 @@ class HasAllRoles
 
     /**
      * Construct HasAllRoles attribute
-     * @param string ...$roles
+     * @param string ...$roles Variable number of role names to check
      */
     public function __construct(string ...$roles)
     {
@@ -29,9 +40,9 @@ class HasAllRoles
 
     /**
      * Handle the role check
-     * @param object $controller
+     * @param object $controller The controller instance
      * @return void
-     * @throws UnauthorizedException
+     * @throws UnauthorizedException If user doesn't have all of the roles
      */
     public function handle(object $controller): void
     {

@@ -7,7 +7,18 @@ use NimblePHP\Authorization\Authorization;
 use NimblePHP\Authorization\Exceptions\UnauthorizedException;
 
 /**
- * HasPermission attribute - checks if user has specific permission
+ * HasPermission attribute - Checks if user has specific permission
+ * 
+ * Applied to controller methods to verify the authenticated user has the specified permission.
+ * If user doesn't have the permission, UnauthorizedException is thrown.
+ * 
+ * Usage:
+ * ```php
+ * #[HasPermission('delete.users')]
+ * public function deleteUser() { ... }
+ * ```
+ * 
+ * @package NimblePHP\Authorization\Attributes
  */
 #[Attribute(Attribute::TARGET_METHOD | Attribute::IS_REPEATABLE)]
 class HasPermission
@@ -20,7 +31,7 @@ class HasPermission
 
     /**
      * Construct HasPermission attribute
-     * @param string $permission
+     * @param string $permission The permission name to check
      */
     public function __construct(string $permission)
     {
@@ -29,9 +40,9 @@ class HasPermission
 
     /**
      * Handle the permission check
-     * @param object $controller
+     * @param object $controller The controller instance
      * @return void
-     * @throws UnauthorizedException
+     * @throws UnauthorizedException If user doesn't have the permission
      */
     public function handle(object $controller): void
     {

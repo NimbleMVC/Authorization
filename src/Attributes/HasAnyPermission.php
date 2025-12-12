@@ -7,7 +7,18 @@ use NimblePHP\Authorization\Authorization;
 use NimblePHP\Authorization\Exceptions\UnauthorizedException;
 
 /**
- * HasAnyPermission attribute - checks if user has any of the specified permissions
+ * HasAnyPermission attribute - Checks if user has any of the specified permissions
+ * 
+ * Applied to controller methods to verify the authenticated user has at least one of
+ * the specified permissions. If user doesn't have any permission, UnauthorizedException is thrown.
+ * 
+ * Usage:
+ * ```php
+ * #[HasAnyPermission('create.posts', 'edit.posts')]
+ * public function managePost() { ... }
+ * ```
+ * 
+ * @package NimblePHP\Authorization\Attributes
  */
 #[Attribute(Attribute::TARGET_METHOD)]
 class HasAnyPermission
@@ -20,7 +31,7 @@ class HasAnyPermission
 
     /**
      * Construct HasAnyPermission attribute
-     * @param string ...$permissions
+     * @param string ...$permissions Variable number of permission names to check
      */
     public function __construct(string ...$permissions)
     {
@@ -29,9 +40,9 @@ class HasAnyPermission
 
     /**
      * Handle the permission check
-     * @param object $controller
+     * @param object $controller The controller instance
      * @return void
-     * @throws UnauthorizedException
+     * @throws UnauthorizedException If user doesn't have any of the permissions
      */
     public function handle(object $controller): void
     {

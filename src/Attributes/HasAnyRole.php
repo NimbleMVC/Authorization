@@ -7,7 +7,18 @@ use NimblePHP\Authorization\Authorization;
 use NimblePHP\Authorization\Exceptions\UnauthorizedException;
 
 /**
- * HasAnyRole attribute - checks if user has any of the specified roles
+ * HasAnyRole attribute - Checks if user has any of the specified roles
+ * 
+ * Applied to controller methods to verify the authenticated user has at least one of
+ * the specified roles. If user doesn't have any of the roles, UnauthorizedException is thrown.
+ * 
+ * Usage:
+ * ```php
+ * #[HasAnyRole('admin', 'moderator')]
+ * public function moderateContent() { ... }
+ * ```
+ * 
+ * @package NimblePHP\Authorization\Attributes
  */
 #[Attribute(Attribute::TARGET_METHOD)]
 class HasAnyRole
@@ -20,7 +31,7 @@ class HasAnyRole
 
     /**
      * Construct HasAnyRole attribute
-     * @param string ...$roles
+     * @param string ...$roles Variable number of role names to check
      */
     public function __construct(string ...$roles)
     {
@@ -29,9 +40,9 @@ class HasAnyRole
 
     /**
      * Handle the role check
-     * @param object $controller
+     * @param object $controller The controller instance
      * @return void
-     * @throws UnauthorizedException
+     * @throws UnauthorizedException If user doesn't have any of the roles
      */
     public function handle(object $controller): void
     {

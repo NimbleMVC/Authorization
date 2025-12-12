@@ -7,6 +7,18 @@ use krzysztofzylka\DatabaseManager\Table;
 use Krzysztofzylka\Hash\VersionedHasher;
 use NimblePHP\Framework\Kernel;
 
+/**
+ * Account class - Handles user account operations and database interactions
+ * 
+ * This class provides methods for:
+ * - User account data management
+ * - Account activation/deactivation
+ * - Role and permission assignment
+ * - Password management
+ * - Account queries and lookups
+ * 
+ * @package NimblePHP\Authorization
+ */
 class Account
 {
 
@@ -171,7 +183,10 @@ class Account
      */
     public function changePassword(string $password): bool
     {
-        return $this->update([Config::getColumn('password') => VersionedHasher::create($password)]);
+        $passwordHasher = Config::getPasswordHasher();
+        $hashedPassword = $passwordHasher->hash($password);
+        
+        return $this->update([Config::getColumn('password') => $hashedPassword]);
     }
 
     /**
@@ -473,6 +488,147 @@ class Account
         $userRolesTable = new Table(Config::getUserRoleTableName());
 
         return $userRolesTable->deleteByConditions([Config::getUserRoleColumn('user_id') => $userId]);
+    }
+
+    /**
+     * Update the 2FA secret for the account
+     *
+     * @param string $secret The 2FA secret key
+     * @param string $provider The 2FA provider name (e.g., 'totp', 'email')
+     * @param int|null $accountId Optional account ID
+     * @return bool True if update was successful
+     * @throws DatabaseManagerException
+     */
+    public function updateTwoFactorSecret(string $secret, string $provider, ?int $accountId = null): bool
+    {
+        $userId = $accountId ?? $this->id;
+
+        if (!$userId) {
+            return false;
+        }
+
+        return $this->account->updateByConditions(
+            [
+                Config::getTwoFactorSecretColumn() => $secret,
+                Config::getTwoFactorProviderColumn() => $provider,
+            ],
+            [Config::getColumn('id') => $userId]
+        );
+    }
+
+    /**
+     * Clear the 2FA secret for the account
+     *
+     * @param int|null $accountId Optional account ID
+     * @return bool True if update was successful
+     * @throws DatabaseManagerException
+     */
+    public function clearTwoFactorSecret(?int $accountId = null): bool
+    {
+        $userId = $accountId ?? $this->id;
+
+        if (!$userId) {
+            return false;
+        }
+
+        return $this->account->updateByConditions(
+            [
+                Config::getTwoFactorSecretColumn() => null,
+                Config::getTwoFactorProviderColumn() => null,
+            ],
+            [Config::getColumn('id') => $userId]
+        );
+    }
+
+    /**
+     * Get the 2FA provider for an account
+     *
+     * @param int|null $accountId Optional account ID
+     * @return string|null The provider name or null if not set
+     * @throws DatabaseManagerException
+     */
+    public function getTwoFactorProvider(?int $accountId = null): ?string
+    {
+        $userId = $accountId ?? $this->id;
+
+        if (!$userId) {
+            return null;
+        }
+
+        $account = $this->find([Config::getColumn('id') => $userId]);
+        if (!$account) {
+            return null;
+        }
+
+        return $account[Config::$tableName][Config::getTwoFactorProviderColumn()] ?? null;
+    }
+
+    /**
+     * Update OAuth data for the account
+     *
+     * Links OAuth provider account to user account
+     *
+     * @param int $accountId Account ID
+     * @param string $oauthId OAuth provider user ID
+     * @param string $oauthProvider OAuth provider name
+     * @return bool True if update was successful
+     * @throws DatabaseManagerException
+     */
+    public function updateOAuthData(int $accountId, string $oauthId, string $oauthProvider): bool
+    {
+        return $this->account->updateByConditions(
+            [
+                Config::getOAuthColumn('id') => $oauthId,
+                Config::getOAuthColumn('provider') => $oauthProvider,
+            ],
+            [Config::getColumn('id') => $accountId]
+        );
+    }
+
+    /**
+     * Get OAuth provider linked to the account
+     *
+     * @param int|null $accountId Optional account ID
+     * @return string|null OAuth provider name or null if not linked
+     * @throws DatabaseManagerException
+     */
+    public function getOAuthProvider(?int $accountId = null): ?string
+    {
+        $userId = $accountId ?? $this->id;
+
+        if (!$userId) {
+            return null;
+        }
+
+        $account = $this->find([Config::getColumn('id') => $userId]);
+        if (!$account) {
+            return null;
+        }
+
+        return $account[Config::$tableName][Config::getOAuthColumn('provider')] ?? null;
+    }
+
+    /**
+     * Get OAuth ID linked to the account
+     *
+     * @param int|null $accountId Optional account ID
+     * @return string|null OAuth ID or null if not linked
+     * @throws DatabaseManagerException
+     */
+    public function getOAuthId(?int $accountId = null): ?string
+    {
+        $userId = $accountId ?? $this->id;
+
+        if (!$userId) {
+            return null;
+        }
+
+        $account = $this->find([Config::getColumn('id') => $userId]);
+        if (!$account) {
+            return null;
+        }
+
+        return $account[Config::$tableName][Config::getOAuthColumn('id')] ?? null;
     }
 
 }

@@ -7,7 +7,16 @@ use krzysztofzylka\DatabaseManager\Exception\DatabaseManagerException;
 use krzysztofzylka\DatabaseManager\Table;
 
 /**
- * Permission management class
+ * Permission class - Manages user permissions and permission-based access control
+ * 
+ * This class provides methods for:
+ * - Permission creation, update and deletion
+ * - Permission grouping and organization
+ * - Permission assignment to roles
+ * - Permission lookups and retrieval
+ * - Role-permission relationship management
+ * 
+ * @package NimblePHP\Authorization
  */
 class Permission
 {

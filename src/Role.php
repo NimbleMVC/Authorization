@@ -7,7 +7,16 @@ use krzysztofzylka\DatabaseManager\Exception\DatabaseManagerException;
 use krzysztofzylka\DatabaseManager\Table;
 
 /**
- * Role management class
+ * Role class - Manages user roles and role-based access control
+ * 
+ * This class provides methods for:
+ * - Role creation, update and deletion
+ * - Role assignment to users
+ * - Permission management for roles
+ * - Role lookups and retrieval
+ * - User role queries
+ * 
+ * @package NimblePHP\Authorization
  */
 class Role
 {

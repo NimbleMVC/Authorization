@@ -1,6 +1,15 @@
 # NimblePHP Authorization
 
-Biblioteka autoryzacyjna dla frameworka NimblePHP, dostarczająca kompletny system zarządzania użytkownikami z bezpiecznym hashowaniem haseł.
+Kompletna biblioteka autoryzacyjna dla frameworka NimblePHP z funkcjonalnościami:
+- Bezpieczne zarządzanie użytkownikami i hasłami
+- System Role-Based Access Control (RBAC)
+- Ochrona przed atakami brute-force (Rate Limiting)
+- Elastyczne, niestandardowe hasherowanie haseł
+- Automatyczne aktualizowanie skrótów haseł
+- Dwuetapowa weryfikacja (2FA) - TOTP i Email
+- OAuth2 - Logowanie społeczne (GitHub)
+- JWT - Bezstanowe tokeny dla API
+- API Keys - Stacjonarne klucze dla dostępu programistycznego
 
 ## Konfiguracja
 
@@ -27,9 +36,14 @@ AUTHORIZATION_COLUMN_USERNAME=username
 AUTHORIZATION_COLUMN_EMAIL=email
 AUTHORIZATION_COLUMN_PASSWORD=password
 AUTHORIZATION_COLUMN_ACTIVE=active
+
+# Konfiguracja Rate Limiting (ochrona przed atakami brute-force)
+AUTHORIZATION_RATE_LIMIT_ENABLED=true
+AUTHORIZATION_RATE_LIMIT_MAX_ATTEMPTS=5
+AUTHORIZATION_RATE_LIMIT_LOCKOUT_DURATION=900
 ```
 
-### Konfiguracja
+### Konfiguracja PHP
 
 ```php
 use NimblePHP\Authorization\Config;
@@ -57,6 +71,314 @@ Config::$columns = [
 
 ```bash
 composer require nimblephp/authorization
+```
+
+## Bezpieczeństwo
+
+### Rate Limiting (Ochrona przed atakami brute-force)
+
+Biblioteka zawiera wbudowaną ochronę przed atakami brute-force na logowanie. System Rate Limiting śledzi nieudane próby logowania i tymczasowo blokuje konto.
+
+#### Konfiguracja Rate Limiting
+
+```php
+use NimblePHP\Authorization\Config;
+
+// Włączenie/wyłączenie rate limitingu (domyślnie: true)
+Config::$rateLimitEnabled = true;
+
+// Maksymalna liczba nieudanych prób (domyślnie: 5)
+Config::$rateLimitMaxAttempts = 5;
+
+// Czas blokady w sekundach (domyślnie: 900 = 15 minut)
+Config::$rateLimitLockoutDuration = 900;
+```
+
+#### Obsługiwanie excepcji Rate Limiting
+
+```php
+use NimblePHP\Authorization\Authorization;
+use NimblePHP\Authorization\Exceptions\RateLimitExceededException;
+
+$auth = new Authorization();
+
+try {
+    $loggedIn = $auth->login('user@example.com', 'password123');
+    if ($loggedIn) {
+        echo "Zalogowano pomyślnie!";
+    } else {
+        echo "Nieprawidłowe dane logowania!";
+    }
+} catch (RateLimitExceededException $e) {
+    echo "Konto tymczasowo zablokowane z powodu zbyt wielu nieudanych prób logowania.";
+    echo "Spróbuj ponownie za " . $e->getRemainingLockoutTime() . " sekund.";
+    // Zwróć HTTP 429 (Too Many Requests)
+    http_response_code(429);
+}
+```
+
+### Niestandardowe hashowanie haseł
+
+Biblioteka pozwala na implementację własnego systemu hashowania haseł poprzez interfejs `PasswordHasher`. Domyślnie używa bezpiecznego systemu VersionedHasher, ale możesz łatwo zastąpić go swoją implementacją.
+
+#### Dostępne implementacje
+
+Biblioteka zawiera kilka gotowych implementacji:
+
+1. **DefaultPasswordHasher** - Domyślna implementacja używająca VersionedHasher (rekomendowana)
+   - Automatycznie aktualizuje skróty haseł przy logowaniu
+   - Obsługuje wiele wersji algorytmów hashowania
+
+2. **BcryptPasswordHasher** - Użycie PHP's native password_hash z algorytmem bcrypt
+   - Bezpieczne, ale wolniejsze
+   - Koszt: 12 (customizable)
+
+3. **ArgonPasswordHasher** - Użycie PHP's password_hash z algorytmem Argon2id
+   - Najbardziej bezpieczne, oporne na ataki GPU
+   - Pamięć: 65536 MB, Iteracje: 4
+
+4. **CustomHasherExample** - Szablon do implementacji własnego hashera
+
+#### Implementacja niestandardowego hashera
+
+Utwórz klasę implementującą interfejs `PasswordHasher`:
+
+```php
+use NimblePHP\Authorization\Interfaces\PasswordHasher;
+
+class MyCustomHasher implements PasswordHasher
+{
+    /**
+     * Hashuje hasło
+     */
+    public function hash(string $password): string
+    {
+        // Twoja implementacja hashowania
+        return hash('sha256', $password . 'moja_sól');
+    }
+
+    /**
+     * Weryfikuje hasło przeciwko skrótowi
+     */
+    public function verify(string $hash, string $password): bool
+    {
+        return hash_equals($hash, $this->hash($password));
+    }
+
+    /**
+     * Sprawdza czy skrót wymaga rehash'u (dla algorytmów obsługujących aktualizację)
+     */
+    public function needsRehash(string $hash): bool
+    {
+        // Zwróć true jeśli hash wymaga aktualizacji
+        return false;
+    }
+}
+```
+
+#### Konfiguracja niestandardowego hashera
+
+```php
+use NimblePHP\Authorization\Config;
+use MyCustomHasher;
+
+// Zarejestruj swój hasher
+Config::setPasswordHasher(new MyCustomHasher());
+```
+
+Lub użyj jednej z gotowych implementacji:
+
+```php
+use NimblePHP\Authorization\Config;
+use NimblePHP\Authorization\Hashers\BcryptPasswordHasher;
+use NimblePHP\Authorization\Hashers\ArgonPasswordHasher;
+
+// Użyj Bcrypt
+Config::setPasswordHasher(new BcryptPasswordHasher());
+
+// Lub Argon2id (najbezpieczniejszy)
+Config::setPasswordHasher(new ArgonPasswordHasher());
+```
+
+#### Automatyczne aktualizowanie haseł
+
+System domyślnie (z DefaultPasswordHasher) automatycznie aktualizuje hasła podczas logowania jeśli potrzebne. Umożliwia to bezproblemową migrację między algorytmami:
+
+```php
+// Jeśli zmienisz algorytm hasherowania, wszystkie hasła zostaną automatycznie
+// zaktualizowane przy następnym logowaniu użytkownika
+try {
+    $loggedIn = $auth->login('user@example.com', 'password123');
+    // Hasło zostało automatycznie rehash'owane jeśli było potrzebne
+} catch (RateLimitExceededException $e) {
+    // Obsłuż rate limit
+}
+```
+
+### Dwuetapowa weryfikacja (2FA)
+
+Biblioteka zawiera wbudowaną obsługę uwierzytelniania dwuetapowego (2FA/MFA). Obsługuje wiele metod weryfikacji:
+- **TOTP** (Time-based One-Time Password) - zgodne z Google Authenticator i innymi aplikacjami
+- **Email** - kody wysyłane na adres email użytkownika
+
+#### Konfiguracja 2FA
+
+Zarejestruj dostawców 2FA w Twojej aplikacji:
+
+```php
+use NimblePHP\Authorization\Config;
+use NimblePHP\Authorization\Providers\TOTPProvider;
+use NimblePHP\Authorization\Providers\EmailProvider;
+
+// Zarejestruj TOTP provider (Google Authenticator)
+Config::registerTwoFactorProvider('totp', new TOTPProvider('Moja Aplikacja'));
+
+// Zarejestruj Email provider
+$emailProvider = new EmailProvider();
+$emailProvider->setEmailCallback(function($email, $code) {
+    // Wyślij kod na email użytkownika
+    mail($email, 'Twój kod weryfikacyjny', "Kod: $code");
+});
+Config::registerTwoFactorProvider('email', $emailProvider);
+```
+
+#### TOTP (Google Authenticator)
+
+TOTP jest najbardziej bezpieczną i popularną metodą 2FA. Generuje kody QR, które użytkownik skanuje swoją aplikacją authenticatora.
+
+**Włączenie 2FA dla użytkownika:**
+
+```php
+use NimblePHP\Authorization\Authorization;
+
+$auth = new Authorization();
+
+// Sprawdź że użytkownik jest zalogowany
+if ($auth->isAuthorized()) {
+    // Pobierz TOTP provider
+    $totp = Config::getTwoFactorProvider('totp');
+    
+    // Włącz 2FA i zwróć informacje o QR kodzie
+    $result = $auth->enableTwoFactorAuth($totp);
+    
+    echo "Secret: " . $result['secret'];
+    echo "QR Code URL: " . $result['qr_code'];
+    echo "Provider: " . $result['provider'];
+}
+```
+
+**Wyświetlanie QR kodu dla użytkownika:**
+
+```php
+// W szablonie HTML
+<img src="<?php echo htmlspecialchars($qrCodeUrl); ?>" alt="2FA QR Code">
+<p>Skanuj kod QR za pomocą aplikacji authenticatora (Google Authenticator, Authy, itp.)</p>
+```
+
+**Weryfikacja kodu TOTP podczas logowania:**
+
+```php
+use NimblePHP\Authorization\Authorization;
+use NimblePHP\Authorization\Exceptions\PendingTwoFactorException;
+use NimblePHP\Authorization\Exceptions\TwoFactorException;
+
+$auth = new Authorization();
+
+try {
+    // Logowanie z hasłem
+    $loggedIn = $auth->login('user@example.com', 'password123');
+    
+    if ($loggedIn && !$auth->isTwoFactorEnabled($auth->getAuthorizedId())) {
+        // 2FA nie jest włączone, zalogowanie ukończone
+        echo "Zalogowano pomyślnie!";
+    }
+} catch (PendingTwoFactorException $e) {
+    // Użytkownik ma 2FA - potrzebna weryfikacja
+    $userId = $e->getUserId();
+    $provider = $e->getProvider();
+    
+    // Przekieruj do strony weryfikacji 2FA
+    // Przechowaj userId w sesji jeśli potrzebne
+    echo "Proszę wpisać kod z Twojej aplikacji authenticatora";
+} catch (RateLimitExceededException $e) {
+    // Obsłuż rate limit
+    echo "Zbyt wiele prób. Spróbuj za " . $e->getRemainingTime() . " sekund.";
+}
+
+// Na stronie weryfikacji 2FA:
+try {
+    $verified = $auth->verifyTwoFactorCode($_POST['2fa_code']);
+    
+    if ($verified) {
+        echo "Zalogowano pomyślnie!";
+    }
+} catch (TwoFactorException $e) {
+    echo "Nieprawidłowy kod: " . $e->getMessage();
+}
+```
+
+#### Email 2FA
+
+Email provider wysyła kody weryfikacyjne na adres email użytkownika.
+
+**Konfiguracja:**
+
+```php
+use NimblePHP\Authorization\Config;
+use NimblePHP\Authorization\Providers\EmailProvider;
+
+$emailProvider = new EmailProvider(6, 600); // 6-cyfrowy kod, ważny 10 minut
+
+// Ustaw funkcję do wysyłania emaili
+$emailProvider->setEmailCallback(function($email, $code) {
+    // Użyj Twojego systemu wysyłania emaili
+    sendEmail($email, 'Kod weryfikacyjny', "Twój kod: $code");
+});
+
+Config::registerTwoFactorProvider('email', $emailProvider);
+```
+
+**Wysłanie kodu weryfikacyjnego:**
+
+```php
+$emailProvider = Config::getTwoFactorProvider('email');
+
+// Wyślij kod na email użytkownika
+$code = $emailProvider->generateCode('user@example.com');
+```
+
+#### Wyłączenie 2FA
+
+```php
+if ($auth->isAuthorized()) {
+    if ($auth->isTwoFactorEnabled()) {
+        $auth->disableTwoFactorAuth();
+        echo "2FA wyłączone";
+    }
+}
+```
+
+#### Kody odzyskania (Recovery Codes)
+
+TOTP provider generuje kody odzyskania, które użytkownik może użyć jeśli utraci dostęp do swojego authenticatora:
+
+```php
+$totp = Config::getTwoFactorProvider('totp');
+$secret = 'JBSWY3DPEBLW64TMMQ'; // Sekret użytkownika
+
+// Generuj kody odzyskania
+$recoveryCodes = $totp->getRecoveryCodes($secret, 10); // Generuj 10 kodów
+
+// Wyświetl użytkownikowi - powinien je zapisać w bezpiecznym miejscu
+foreach ($recoveryCodes as $code) {
+    echo $code . "\n";
+}
+
+// Weryfikacja kodu odzyskania podczas logowania
+if ($totp->verifyRecoveryCode($secret, $_POST['recovery_code'])) {
+    // Kod jest ważny - zaloguj użytkownika
+    $auth->verifyTwoFactorCode($_POST['recovery_code']);
+}
 ```
 
 ## Funkcjonalności
@@ -440,6 +762,52 @@ try {
 } catch (InvalidArgumentException $e) {
     echo "Błąd logowania: " . $e->getMessage();
 }
+```
+
+#### HTTP Basic Authentication
+
+Biblioteka wspiera HTTP Basic Auth (RFC 7617) dla API i dostępu programistycznego:
+
+```php
+use NimblePHP\Authorization\Authorization;
+
+$auth = new Authorization();
+
+try {
+    if ($auth->authenticateHttpBasic()) {
+        echo "Autoryzacja HTTP Basic się powiodła";
+        $userId = $auth->getAuthorizedId();
+    }
+} catch (InvalidArgumentException $e) {
+    echo "Błąd formatu Authorization nagłówka: " . $e->getMessage();
+    http_response_code(400);
+} catch (RateLimitExceededException $e) {
+    echo "Zbyt wiele prób logowania";
+    http_response_code(429);
+}
+```
+
+**Wysyłanie HTTP Basic Auth (z przeglądarki/curl):**
+
+```bash
+curl -H "Authorization: Basic $(echo -n 'username:password' | base64)" \
+     https://example.com/api/protected
+```
+
+**W JavaScript/Fetch API:**
+
+```javascript
+const username = 'user@example.com';
+const password = 'bezpieczne_haslo123';
+const credentials = btoa(username + ':' + password);
+
+fetch('/api/protected', {
+    headers: {
+        'Authorization': 'Basic ' + credentials
+    }
+})
+.then(response => response.json())
+.then(data => console.log(data));
 ```
 
 ### Sprawdzanie statusu autoryzacji
@@ -874,3 +1242,327 @@ Biblioteka może rzucać następujące wyjątki:
 
 - `InvalidArgumentException` - przy nieprawidłowych danych wejściowych
 - `UnauthorizedException` - gdy użytkownik próbuje uzyskać dostęp do chronionego zasobu bez autoryzacji
+- `RateLimitExceededException` - gdy limit nieudanych prób logowania został przekroczony (HTTP 429)
+- `TwoFactorException` - gdy weryfikacja kodu 2FA nie powiodła się (kod nieprawidłowy lub wygasły)
+- `PendingTwoFactorException` - gdy użytkownik zalogował się, ale wymaga weryfikacji 2FA (zawiera ID użytkownika i dostawcę)
+
+## OAuth2 - Logowanie społeczne
+
+Biblioteka wspiera logowanie za pośrednictwem OAuth2. Dostarczone są implementacje dla GitHub i przygotowana architektura do łatwego dodawania dodatkowych dostawców (Google, Facebook, itp.).
+
+### Konfiguracja GitHub OAuth2
+
+#### 1. Rejestracja aplikacji na GitHub
+
+1. Przejdź na https://github.com/settings/developers
+2. Kliknij "New OAuth App"
+3. Wypełnij formularz:
+   - **Application name**: Nazwa aplikacji
+   - **Homepage URL**: https://twoja-domena.com
+   - **Authorization callback URL**: https://twoja-domena.com/oauth/github/callback
+4. Skopiuj Client ID i Client Secret
+
+#### 2. Konfiguracja w aplikacji
+
+```php
+use NimblePHP\Authorization\Authorization;
+use NimblePHP\Authorization\Providers\GitHubProvider;
+
+$auth = new Authorization();
+
+// Rejestracja providera
+$githubProvider = new GitHubProvider(
+    'YOUR_CLIENT_ID',
+    'YOUR_CLIENT_SECRET'
+);
+
+\NimblePHP\Authorization\Config::registerOAuthProvider('github', $githubProvider);
+```
+
+#### 3. Inicjalizacja logowania OAuth
+
+```php
+// W kontrolerze - przekieruj użytkownika do GitHub
+$auth = new Authorization();
+$redirectUri = 'https://twoja-domena.com/oauth/github/callback';
+$authUrl = $auth->initiateOAuthLogin('github', $redirectUri);
+
+header('Location: ' . $authUrl);
+```
+
+#### 4. Obsługa callback'u
+
+```php
+// W kontrolerze callback'u (np. /oauth/github/callback)
+$auth = new Authorization();
+
+try {
+    $code = $_GET['code'] ?? null;
+    
+    if (!$code) {
+        throw new \Exception('Brak kodu autoryzacyjnego');
+    }
+    
+    // Obsługa callbacku i pobieranie danych użytkownika
+    $redirectUri = 'https://twoja-domena.com/oauth/github/callback';
+    $userData = $auth->handleOAuthCallback($code, 'github');
+    
+    // Logowanie użytkownika (tworzy konto jeśli nie istnieje)
+    if ($auth->loginWithOAuth($userData)) {
+        header('Location: /dashboard');
+        exit;
+    }
+} catch (\Exception $e) {
+    echo 'Błąd autoryzacji: ' . $e->getMessage();
+}
+```
+
+### Dane otrzymane z OAuth2
+
+Po pomyślnej autoryzacji otrzymujesz takie dane:
+
+**Dla GitHub OAuth2:**
+```php
+[
+    'oauth_id' => '12345678',        // GitHub user ID
+    'oauth_provider' => 'github',     // Dostawca OAuth
+    'username' => 'octocat',          // GitHub login
+    'email' => 'octocat@github.com',  // Email użytkownika
+    'name' => 'The Octocat',          // Imię i nazwisko
+    'avatar' => 'https://...',        // Avatar URL
+    'profile_url' => 'https://...'    // URL profilu GitHub
+]
+```
+
+### Tworzenie niestandardowego providera OAuth2
+
+Aby dodać nowego dostawcę OAuth2, stwórz klasę implementującą `OAuthProvider`:
+
+```php
+<?php
+
+namespace MyApp\OAuth;
+
+use NimblePHP\Authorization\Interfaces\OAuthProvider;
+
+class GoogleProvider implements OAuthProvider
+{
+    private string $clientId;
+    private string $clientSecret;
+    
+    public function __construct(string $clientId, string $clientSecret)
+    {
+        $this->clientId = $clientId;
+        $this->clientSecret = $clientSecret;
+    }
+    
+    public function getAuthorizationUrl(string $state): string
+    {
+        return 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query([
+            'client_id' => $this->clientId,
+            'redirect_uri' => 'https://twoja-domena.com/oauth/google/callback',
+            'response_type' => 'code',
+            'scope' => 'openid profile email',
+            'state' => $state,
+        ]);
+    }
+    
+    public function exchangeCodeForToken(string $code): array
+    {
+        // Implementacja wymiany kodu na token
+    }
+    
+    public function getUserData(string $accessToken): array
+    {
+        // Implementacja pobierania danych użytkownika
+    }
+    
+    public function getName(): string
+    {
+        return 'google';
+    }
+    
+    public function getClientId(): string
+    {
+        return $this->clientId;
+    }
+    
+    public function getClientSecret(): string
+    {
+        return $this->clientSecret;
+    }
+}
+```
+
+Następnie zarejestruj providera:
+
+```php
+$googleProvider = new \MyApp\OAuth\GoogleProvider('CLIENT_ID', 'CLIENT_SECRET');
+\NimblePHP\Authorization\Config::registerOAuthProvider('google', $googleProvider);
+```
+
+### Bezpieczeństwo OAuth2
+
+- Stan jest generowany losowo i walidowany podczas callbacku (ochrona przed CSRF)
+- Dane OAuth są przechowywane w kolumnach `account_oauth_id` i `account_oauth_provider`
+- Logowanie OAuth obsługuje matching e-maila - jeśli użytkownik z tym e-mailem już istnieje, jego konto jest połączone
+- Można wymusić tworzenie nowych kont poprzez parametr `createIfNotExists`
+
+```php
+// Logowanie bez tworzenia konta jeśli użytkownik nie istnieje
+$auth->loginWithOAuth($userData, createIfNotExists: false);
+```
+
+## Token-Based Authentication
+
+Biblioteka wspiera nowoczesne metody autoryzacji API oparte na tokenach.
+
+### JWT (JSON Web Tokens)
+
+RFC 7519 standard dla stateless, bezpiecznych tokenów.
+
+#### Konfiguracja
+
+```php
+use NimblePHP\Authorization\Config;
+use NimblePHP\Authorization\Providers\JWTProvider;
+
+$jwtProvider = new JWTProvider(
+    $_ENV['JWT_SECRET'],  // Minimum 32 characters
+    'HS256',              // Algorithm
+    3600                  // Default expiration (1 hour)
+);
+
+Config::registerTokenProvider('jwt', $jwtProvider);
+```
+
+#### Generowanie tokenu
+
+```php
+$auth = new Authorization();
+
+if ($auth->login($username, $password)) {
+    $token = $auth->generateToken(
+        $auth->getAuthorizedId(),
+        'jwt',
+        ['role' => 'user'],
+        3600
+    );
+    
+    echo json_encode(['token' => $token]);
+}
+```
+
+#### Walidacja tokenu
+
+```php
+$auth = new Authorization();
+
+try {
+    $tokenData = $auth->validateToken($authToken, 'jwt');
+    $userId = $tokenData['user_id'];
+    
+    // Token jest ważny
+    
+} catch (Exception $e) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Invalid token']);
+}
+```
+
+### API Keys
+
+Stacjonarne klucze API z loggingiem i rate limitingiem.
+
+#### Konfiguracja
+
+```php
+use NimblePHP\Authorization\Config;
+use NimblePHP\Authorization\Providers\APIKeyProvider;
+
+$apiKeyProvider = new APIKeyProvider();
+
+Config::registerTokenProvider('api_key', $apiKeyProvider);
+```
+
+#### Generowanie klucza
+
+```php
+$auth = new Authorization();
+
+$apiKey = $auth->generateToken(
+    $auth->getAuthorizedId(),
+    'api_key',
+    [
+        'name' => 'My API Key',
+        'scopes' => ['read:users', 'write:posts'],
+        'rate_limit' => 1000  // Requests per hour
+    ],
+    365 * 24 * 3600  // 1 year
+);
+
+echo $apiKey;  // sk_abcdef1234567890...
+```
+
+#### Walidacja klucza
+
+```php
+$auth = new Authorization();
+
+try {
+    $keyData = $auth->validateToken($apiKey, 'api_key');
+    $userId = $keyData['user_id'];
+    $scopes = $keyData['scopes'];
+    
+} catch (Exception $e) {
+    http_response_code(401);
+}
+```
+
+#### Zarządzanie kluczami
+
+```php
+$auth = new Authorization();
+$provider = $auth->getTokenProvider('api_key');
+$userId = $auth->getAuthorizedId();
+
+// Lista kluczy użytkownika
+$keys = $provider->listUserKeys($userId);
+
+// Detale klucza
+$key = $provider->getKey($keyId, $userId);
+
+// Aktualizacja klucza
+$provider->updateKey($keyId, $userId, [
+    'name' => 'Updated Name',
+    'rate_limit' => 5000
+]);
+
+// Revocation (deaktywacja)
+$auth->revokeToken($apiKey, 'api_key');
+```
+
+#### Rate Limiting
+
+```php
+$provider = $auth->getTokenProvider('api_key');
+
+$rateLimit = $provider->getRateLimit($apiKey);
+
+// Odpowiedź
+header('X-RateLimit-Limit: ' . $rateLimit['limit']);
+header('X-RateLimit-Used: ' . $rateLimit['used']);
+header('X-RateLimit-Remaining: ' . $rateLimit['remaining']);
+
+if ($rateLimit['remaining'] <= 0) {
+    http_response_code(429);
+    echo json_encode(['error' => 'Rate limit exceeded']);
+}
+```
+
+## Dokumentacja
+
+- [JWT + API Keys Guide](JWT_API_KEYS.md) - Comprehensive JWT and API Keys documentation
+- [2FA Guide](TWO_FACTOR_AUTH.md) - Two-Factor Authentication implementation
+- [GitHub OAuth Guide](GITHUB_OAUTH.md) - GitHub OAuth2 login setup
+- [Custom Hasher Guide](CUSTOM_HASHER.md) - Custom password hasher implementation

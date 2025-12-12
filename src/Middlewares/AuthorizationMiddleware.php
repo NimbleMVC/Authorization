@@ -16,15 +16,31 @@ use NimblePHP\Framework\Middleware\Abstracts\AbstractControllerMiddleware;
 use NimblePHP\Framework\Middleware\Interfaces\ControllerMiddlewareInterface;
 use ReflectionMethod;
 
+/**
+ * AuthorizationMiddleware - Handles authorization checks for controller methods
+ * 
+ * This middleware processes authorization attributes and enforces access control based on:
+ * - Default authorization policy (AUTHORIZATION_REQUIRE_AUTH_BY_DEFAULT)
+ * - RequireAuth attribute
+ * - NoAuth attribute (bypass authorization)
+ * - Role attributes (HasRole, HasAnyRole, HasAllRoles)
+ * - Permission attributes (HasPermission, HasAnyPermission)
+ * 
+ * @package NimblePHP\Authorization\Middlewares
+ */
 class AuthorizationMiddleware extends AbstractControllerMiddleware implements ControllerMiddlewareInterface
 {
 
     /**
      * Check authorization based on default policy and attributes
-     * @param ReflectionMethod $reflection
-     * @param object $controller
+     * 
+     * This method is called after reflection attributes are processed for a controller method.
+     * It enforces authorization rules based on attributes and configuration.
+     * 
+     * @param ReflectionMethod $reflection The reflected controller method
+     * @param object $controller The controller instance
      * @return void
-     * @throws UnauthorizedException
+     * @throws UnauthorizedException If authorization fails
      */
     public function afterAttributesController(ReflectionMethod $reflection, object $controller): void
     {
