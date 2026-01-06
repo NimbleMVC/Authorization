@@ -53,6 +53,12 @@ class Config
      */
     public static bool $requireAuthByDefault = false;
 
+    /**
+     * Language code for translations (en, pl, etc.)
+     * @var string
+     */
+    public static string $language = 'en';
+
     // ===== Password Hashing Configuration =====
 
     /**
@@ -160,11 +166,15 @@ class Config
         self::$rateLimitEnabled = filter_var($_ENV['AUTHORIZATION_RATE_LIMIT_ENABLED'] ?? true, FILTER_VALIDATE_BOOLEAN);
         self::$rateLimitMaxAttempts = (int)($_ENV['AUTHORIZATION_RATE_LIMIT_MAX_ATTEMPTS'] ?? 5);
         self::$rateLimitLockoutDuration = (int)($_ENV['AUTHORIZATION_RATE_LIMIT_LOCKOUT_DURATION'] ?? 900);
+        self::$language = $_ENV['AUTHORIZATION_LANGUAGE'] ?? 'en';
         self::$columns['id'] = $_ENV['AUTHORIZATION_COLUMN_ID'] ?? 'id';
         self::$columns['username'] = $_ENV['AUTHORIZATION_COLUMN_USERNAME'] ?? 'username';
         self::$columns['email'] = $_ENV['AUTHORIZATION_COLUMN_EMAIL'] ?? 'email';
         self::$columns['password'] = $_ENV['AUTHORIZATION_COLUMN_PASSWORD'] ?? 'password';
         self::$columns['active'] = $_ENV['AUTHORIZATION_COLUMN_ACTIVE'] ?? 'active';
+
+        // Initialize language
+        Lang::setLanguage(self::$language);
 
         self::initRbac();
     }

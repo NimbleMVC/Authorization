@@ -9,6 +9,7 @@ use Krzysztofzylka\Hash\VersionedHasher;
 use NimblePHP\Authorization\Exceptions\RateLimitExceededException;
 use NimblePHP\Authorization\Exceptions\TwoFactorException;
 use NimblePHP\Authorization\Exceptions\PendingTwoFactorException;
+use NimblePHP\Authorization\Exceptions\ValidationException;
 use NimblePHP\Authorization\Interfaces\TwoFactorProvider;
 use NimblePHP\Authorization\Interfaces\OAuthProvider;
 use NimblePHP\Authorization\Interfaces\TokenProvider;
@@ -99,28 +100,28 @@ class Authorization
     {
         if (Config::isUsernameAuth()) {
             if (empty(trim($username))) {
-                throw new InvalidArgumentException('Username cannot be empty');
+                throw new ValidationException(Lang::get('validation.username_empty'));
             }
 
-            if ($this->account->userExists($username)) {
-                throw new InvalidArgumentException('Username already exists');
+            if ($this->account->userExists(identifier: $username)) {
+                throw new ValidationException(Lang::get('validation.username_exists'));
             }
         } elseif (Config::isEmailAuth()) {
             if (empty(trim($email))) {
-                throw new InvalidArgumentException('Email cannot be empty');
+                throw new ValidationException(Lang::get('validation.email_empty'));
             }
 
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                throw new InvalidArgumentException('Invalid email format');
+                throw new ValidationException(Lang::get('validation.email_invalid'));
             }
 
             if ($this->account->emailExists($email)) {
-                throw new InvalidArgumentException('Email already exists');
+                throw new ValidationException(Lang::get('validation.email_exists'));
             }
         }
 
         if (strlen($password) < 6) {
-            throw new InvalidArgumentException('Password must be at least 6 characters long');
+            throw new ValidationException(Lang::get('validation.password_too_short'));
         }
 
         // Hash password using configured hasher
@@ -146,7 +147,7 @@ class Authorization
      * @param string $login
      * @param string $password
      * @return bool
-     * @throws InvalidArgumentException If validation fails
+     * @throws ValidationException If validation fails
      * @throws RateLimitExceededException If rate limit exceeded
      * @throws DatabaseManagerException
      */
@@ -154,11 +155,11 @@ class Authorization
     {
         if (empty(trim($login))) {
             $field = Config::isEmailAuth() ? 'Email' : 'Username';
-            throw new InvalidArgumentException($field . ' cannot be empty');
+            throw new ValidationException(Lang::get('validation.login_empty', ['field' => $field]));
         }
 
         if (empty($password)) {
-            throw new InvalidArgumentException('Password cannot be empty');
+            throw new ValidationException(Lang::get('validation.password_empty'));
         }
 
         // Check rate limiting
@@ -171,7 +172,7 @@ class Authorization
 
         if (Config::isEmailAuth()) {
             if (!filter_var($login, FILTER_VALIDATE_EMAIL)) {
-                throw new InvalidArgumentException('Invalid email format');
+                throw new ValidationException(Lang::get('validation.email_invalid'));
             }
 
             $conditions[Config::getColumn('email')] = $login;
@@ -266,7 +267,7 @@ class Authorization
         list($login, $password) = $parts;
 
         if (empty($login) || empty($password)) {
-            throw new InvalidArgumentException('Username and password cannot be empty');
+            throw new ValidationException(Lang::get('validation.credentials_empty'));
         }
 
         try {
@@ -306,7 +307,7 @@ class Authorization
     public function enableTwoFactorAuth(TwoFactorProvider $provider): array
     {
         if (!$this->isAuthorized()) {
-            throw new InvalidArgumentException('User must be authenticated to enable 2FA');
+            throw new InvalidArgumentException(Lang::get('auth.user_must_be_authenticated_2fa_enable'));
         }
 
         $userId = $this->getAuthorizedId();
@@ -352,7 +353,7 @@ class Authorization
     {
         // Check if there's a pending 2FA verification
         if (!$this->session->exists(Config::$twoFactorSessionKey)) {
-            throw new InvalidArgumentException('No pending 2FA verification');
+            throw new InvalidArgumentException(Lang::get('auth.no_pending_2fa'));
         }
 
         $pendingUserId = $this->session->get(Config::$twoFactorSessionKey);
@@ -360,13 +361,13 @@ class Authorization
 
         // Verify the user ID matches if provided
         if ($userId !== null && (int)$userId !== $pendingUserId) {
-            throw new InvalidArgumentException('User ID mismatch');
+            throw new InvalidArgumentException(Lang::get('auth.user_id_mismatch'));
         }
 
         // Get the 2FA provider
         $provider = Config::getTwoFactorProvider($providerName);
         if (!$provider) {
-            throw new InvalidArgumentException('2FA provider not configured: ' . $providerName);
+            throw new InvalidArgumentException(Lang::get('auth.2fa_provider_not_configured', ['provider' => $providerName]));
         }
 
         // Get user's 2FA secret
@@ -376,7 +377,7 @@ class Authorization
         if (!$userAccount) {
             $this->session->remove(Config::$twoFactorSessionKey);
             $this->session->remove(Config::$twoFactorProviderSessionKey);
-            throw new InvalidArgumentException('User not found');
+            throw new InvalidArgumentException(Lang::get('auth.user_not_found'));
         }
 
         $secret = $userAccount[Config::$tableName][Config::getTwoFactorSecretColumn()] ?? null;
@@ -384,7 +385,7 @@ class Authorization
         if (!$secret) {
             $this->session->remove(Config::$twoFactorSessionKey);
             $this->session->remove(Config::$twoFactorProviderSessionKey);
-            throw new InvalidArgumentException('2FA not enabled for user');
+            throw new InvalidArgumentException(Lang::get('auth.2fa_not_enabled'));
         }
 
         // Verify the code
@@ -413,7 +414,7 @@ class Authorization
     public function disableTwoFactorAuth(): bool
     {
         if (!$this->isAuthorized()) {
-            throw new InvalidArgumentException('User must be authenticated to disable 2FA');
+            throw new InvalidArgumentException(Lang::get('auth.user_must_be_authenticated_2fa_disable'));
         }
 
         $userId = $this->getAuthorizedId();
