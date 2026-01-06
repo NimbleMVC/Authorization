@@ -165,7 +165,7 @@ class Authorization
         // Check rate limiting
         if (Config::isRateLimitEnabled() && $this->rateLimiter->isRateLimited($login)) {
             $remaining = $this->rateLimiter->getLockoutTimeRemaining($login);
-            throw new RateLimitExceededException("Too many login attempts. Please try again in {$remaining} seconds.", $remaining);
+            throw new RateLimitExceededException(Lang::get('validation.rate_limit_exceeded', ['seconds' => $remaining]), $remaining);
         }
 
         $conditions = [];

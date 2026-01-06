@@ -14,6 +14,7 @@ return [
         'invalid_credentials' => 'Invalid username or password',
         'account_not_activated' => 'Account has not been activated',
         'authorization_header_missing' => 'Authorization header is missing',
+        'rate_limit_exceeded' => 'Too many login attempts. Please try again in {seconds} seconds',
     ],
     'auth' => [
         'user_must_be_authenticated_2fa_enable' => 'User must be authenticated to enable 2FA',

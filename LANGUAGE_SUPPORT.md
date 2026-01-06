@@ -47,6 +47,7 @@ Lang::setLanguage('pl');
 - `validation.invalid_credentials` - Invalid username or password
 - `validation.account_not_activated` - Account has not been activated
 - `validation.authorization_header_missing` - Authorization header is missing
+- `validation.rate_limit_exceeded` - Too many login attempts (with seconds placeholder)
 
 ### Authentication Messages
 
