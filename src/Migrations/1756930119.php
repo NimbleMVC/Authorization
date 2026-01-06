@@ -19,14 +19,14 @@ return new class extends AbstractMigration {
 
     private function accounts(): void
     {
-        if ((new Table('accounts'))->exists()) {
+        if ((new Table(\NimblePHP\Authorization\Config::$tableName))->exists()) {
             return;
         }
 
         $table = new CreateTable();
-        $table->setName('accounts');
+        $table->setName(\NimblePHP\Authorization\Config::$tableName);
         $table->addIdColumn();
-        $table->addUsernameColumn();
+        $table->addUsernameColumn(true, \NimblePHP\Authorization\Config::$authType);
         $table->addPasswordColumn();
         $table->addEmailColumn();
         $table->addSimpleBoolColumn('active', true);

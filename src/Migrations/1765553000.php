@@ -15,9 +15,9 @@ return new class extends AbstractMigration {
 
     private function addOAuthColumnsToAccounts(): void
     {
-        $table = new Table('accounts');
+        $table = new Table(\NimblePHP\Authorization\Config::$tableName);
 
-        $alter = new AlterTable('accounts');
+        $alter = new AlterTable(\NimblePHP\Authorization\Config::$tableName);
 
         $oauthIdColumn = new Column();
         $oauthIdColumn->setName('account_oauth_id');

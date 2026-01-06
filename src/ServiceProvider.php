@@ -4,8 +4,10 @@ namespace NimblePHP\Authorization;
 
 use krzysztofzylka\DatabaseManager\Exception\ConnectException;
 use krzysztofzylka\DatabaseManager\Exception\DatabaseManagerException;
+use NimblePHP\Authorization\Middlewares\AuthorizationMiddleware;
 use NimblePHP\Framework\Exception\DatabaseException;
 use NimblePHP\Framework\Exception\NimbleException;
+use NimblePHP\Framework\Interfaces\ServiceProviderInterface;
 use NimblePHP\Framework\Interfaces\ServiceProviderUpdateInterface;
 use NimblePHP\Framework\Kernel;
 use NimblePHP\Migrations\Exceptions\MigrationException;
@@ -22,8 +24,18 @@ use Throwable;
  * 
  * @package NimblePHP\Authorization
  */
-class ServiceProvider implements ServiceProviderUpdateInterface
+class ServiceProvider implements ServiceProviderUpdateInterface, ServiceProviderInterface
 {
+
+    /**
+     * Register module
+     * @return void
+     */
+    public function register(): void
+    {
+        Config::init();
+        Kernel::$middlewareManager->add(new AuthorizationMiddleware(), Config::$middlewarePriority);
+    }
 
     /**
      * Execute on application update - runs pending migrations
@@ -37,6 +49,7 @@ class ServiceProvider implements ServiceProviderUpdateInterface
      */
     public function onUpdate(): void
     {
+        Config::init();
         $migration = new Migrations(Kernel::$projectPath, __DIR__ . '/Migrations', 'module_authorization');
         $migration->runMigrations();
     }
