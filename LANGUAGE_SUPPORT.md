@@ -44,6 +44,9 @@ Lang::setLanguage('pl');
 - `validation.password_too_short` - Password must be at least 6 characters long
 - `validation.login_empty` - Login field cannot be empty
 - `validation.credentials_empty` - Username and password cannot be empty
+- `validation.invalid_credentials` - Invalid username or password
+- `validation.account_not_activated` - Account has not been activated
+- `validation.authorization_header_missing` - Authorization header is missing
 
 ### Authentication Messages
 
@@ -102,15 +105,61 @@ $message = Lang::get('auth.2fa_provider_not_configured', ['provider' => 'totp'])
 
 ## Exception Messages
 
-All validation exceptions now use the language system:
+All validation exceptions now use the language system. The `login()` method now throws `ValidationException` instead of returning `false` for better error handling:
 
 ```php
+use NimblePHP\Authorization\Exceptions\ValidationException;
+
+try {
+    $auth->login('user@example.com', 'wrongpassword');
+} catch (ValidationException $e) {
+    echo $e->getMessage();
+    // English: "Invalid username or password"
+    // Polish: "Nieprawidłowa nazwa użytkownika lub hasło"
+}
+
 try {
     $auth->register('', 'password123');
 } catch (ValidationException $e) {
     echo $e->getMessage();
     // English: "Username cannot be empty"
     // Polish: "Nazwa użytkownika nie może być pusta"
+}
+
+try {
+    $auth->login('inactive@example.com', 'password123');
+} catch (ValidationException $e) {
+    echo $e->getMessage();
+    // English: "Account has not been activated"
+    // Polish: "Konto nie zostało aktywowane"
+}
+```
+
+### Breaking Change
+
+The `login()` method now throws `ValidationException` for invalid credentials instead of returning `false`. Update your code accordingly:
+
+**Before:**
+```php
+if ($auth->login($email, $password)) {
+    // Success
+} else {
+    // Could be wrong password, inactive account, or user not found
+    echo "Login failed";
+}
+```
+
+**After:**
+```php
+try {
+    $auth->login($email, $password);
+    // Success
+} catch (ValidationException $e) {
+    // Specific error message
+    echo $e->getMessage();
+} catch (RateLimitExceededException $e) {
+    // Rate limit exceeded
+    echo $e->getMessage();
 }
 ```
 

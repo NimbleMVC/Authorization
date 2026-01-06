@@ -11,6 +11,9 @@ return [
         'password_too_short' => 'Hasło musi mieć co najmniej 6 znaków',
         'login_empty' => '{field} nie może być puste',
         'credentials_empty' => 'Nazwa użytkownika i hasło nie mogą być puste',
+        'invalid_credentials' => 'Nieprawidłowa nazwa użytkownika lub hasło',
+        'account_not_activated' => 'Konto nie zostało aktywowane',
+        'authorization_header_missing' => 'Brak nagłówka autoryzacji',
     ],
     'auth' => [
         'user_must_be_authenticated_2fa_enable' => 'Użytkownik musi być zalogowany, aby włączyć 2FA',

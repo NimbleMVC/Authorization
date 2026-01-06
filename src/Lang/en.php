@@ -11,6 +11,9 @@ return [
         'password_too_short' => 'Password must be at least 6 characters long',
         'login_empty' => '{field} cannot be empty',
         'credentials_empty' => 'Username and password cannot be empty',
+        'invalid_credentials' => 'Invalid username or password',
+        'account_not_activated' => 'Account has not been activated',
+        'authorization_header_missing' => 'Authorization header is missing',
     ],
     'auth' => [
         'user_must_be_authenticated_2fa_enable' => 'User must be authenticated to enable 2FA',

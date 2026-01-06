@@ -146,8 +146,8 @@ class Authorization
      * Login the user
      * @param string $login
      * @param string $password
-     * @return bool
-     * @throws ValidationException If validation fails
+     * @return bool Always returns true on successful login
+     * @throws ValidationException If validation fails or credentials are invalid
      * @throws RateLimitExceededException If rate limit exceeded
      * @throws DatabaseManagerException
      */
@@ -187,7 +187,7 @@ class Authorization
             if (Config::isRateLimitEnabled()) {
                 $this->rateLimiter->recordFailedAttempt($login);
             }
-            return false;
+            throw new ValidationException(Lang::get('validation.invalid_credentials'));
         }
 
         if (!VersionedHasher::verify($account[Config::$tableName][Config::getColumn('password')], $password)) {
@@ -195,7 +195,7 @@ class Authorization
             if (Config::isRateLimitEnabled()) {
                 $this->rateLimiter->recordFailedAttempt($login);
             }
-            return false;
+            throw new ValidationException(Lang::get('validation.invalid_credentials'));
         }
 
         if (Config::isActivationRequired() && empty($account[Config::$tableName][Config::getColumn('active')])) {
@@ -203,7 +203,7 @@ class Authorization
             if (Config::isRateLimitEnabled()) {
                 $this->rateLimiter->recordFailedAttempt($login);
             }
-            return false;
+            throw new ValidationException(Lang::get('validation.account_not_activated'));
         }
 
         $this->account->setId($account[Config::$tableName][Config::getColumn('id')]);
@@ -232,6 +232,7 @@ class Authorization
      *
      * @param bool $send401OnFailure Whether to send 401 header on auth failure
      * @return bool True if authentication successful
+     * @throws ValidationException If Authorization header is missing or credentials are invalid
      * @throws InvalidArgumentException If Authorization header is invalid
      * @throws RateLimitExceededException If rate limit exceeded
      * @throws DatabaseManagerException
@@ -245,7 +246,7 @@ class Authorization
                 header('HTTP/1.1 401 Unauthorized');
                 header('WWW-Authenticate: Basic realm="' . Config::$authType . '"');
             }
-            return false;
+            throw new ValidationException(Lang::get('validation.authorization_header_missing'));
         }
 
         if (strpos($authHeader, 'Basic ') !== 0) {
