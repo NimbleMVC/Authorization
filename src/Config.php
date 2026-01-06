@@ -24,6 +24,12 @@ class Config
 {
 
     /**
+     * Middleware priority
+     * @var int
+     */
+    public static int $middlewarePriority = 255;
+
+    /**
      * Authentication type: 'username' or 'email'
      * @var string
      */
@@ -172,6 +178,7 @@ class Config
         self::$columns['email'] = $_ENV['AUTHORIZATION_COLUMN_EMAIL'] ?? 'email';
         self::$columns['password'] = $_ENV['AUTHORIZATION_COLUMN_PASSWORD'] ?? 'password';
         self::$columns['active'] = $_ENV['AUTHORIZATION_COLUMN_ACTIVE'] ?? 'active';
+        self::$middlewarePriority = $_ENV['AUTHORIZATION_MIDDLEWARE_PRIORITY'] ?? 255;
 
         // Initialize language
         Lang::setLanguage(self::$language);
