@@ -34,7 +34,10 @@ class ServiceProvider implements ServiceProviderUpdateInterface, ServiceProvider
     public function register(): void
     {
         Config::init();
-        Kernel::$middlewareManager->add(new AuthorizationMiddleware(), Config::$middlewarePriority);
+
+        if (isset(Kernel::$middlewareManager)) {
+            Kernel::$middlewareManager->add(new AuthorizationMiddleware(), Config::$middlewarePriority);
+        }
     }
 
     /**
