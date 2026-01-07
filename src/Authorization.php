@@ -219,6 +219,19 @@ class Authorization
             $this->rateLimiter->clearAttempts($login);
         }
 
+        // Check if 2FA is enabled for this user
+        $tableName = Config::$tableName;
+        $secret = $account[$tableName][Config::getTwoFactorSecretColumn()] ?? null;
+        $provider = $account[$tableName][Config::getTwoFactorProviderColumn()] ?? null;
+        
+        if (!empty($secret) && !empty($provider)) {
+            // User has 2FA enabled - store user ID temporarily and throw exception
+            $userId = (int)$account[$tableName][Config::getColumn('id')];
+            $this->session->set(Config::$twoFactorSessionKey, $userId);
+            $this->session->set(Config::$twoFactorProviderSessionKey, $provider);
+            throw new PendingTwoFactorException($userId, $provider, Lang::get('validation.two_factor_required'));
+        }
+
         $this->session->set(Config::$sessionKey, $account[Config::$tableName][Config::getColumn('id')]);
 
         return true;
@@ -393,7 +406,7 @@ class Authorization
         if (!$provider->verify($secret, $code)) {
             // Check if it's a recovery code
             if (!$provider->verifyRecoveryCode($secret, $code)) {
-                throw new TwoFactorException('Invalid or expired 2FA code');
+                throw new TwoFactorException(Lang::get('validation.invalid_2fa_code'));
             }
         }
 

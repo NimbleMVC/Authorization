@@ -18,7 +18,7 @@ class TwoFactorException extends Exception
      * @param int $code The exception code
      * @param Exception|null $previous The previous exception for exception chaining
      */
-    public function __construct(string $message = "Two-factor authentication failed", int $code = 0, Exception $previous = null)
+    public function __construct(string $message = "Two-factor authentication failed", int $code = 0, ?Exception $previous = null)
     {
         parent::__construct($message, $code, $previous);
     }

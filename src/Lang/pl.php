@@ -15,6 +15,8 @@ return [
         'account_not_activated' => 'Konto nie zostało aktywowane',
         'authorization_header_missing' => 'Brak nagłówka autoryzacji',
         'rate_limit_exceeded' => 'Zbyt wiele prób logowania. Spróbuj ponownie za {seconds} sekund',
+        'two_factor_required' => 'Wymagana autoryzacja dwuskładnikowa',
+        'invalid_2fa_code' => 'Nieprawidłowy lub wygasły kod 2FA',
     ],
     'auth' => [
         'user_must_be_authenticated_2fa_enable' => 'Użytkownik musi być zalogowany, aby włączyć 2FA',
