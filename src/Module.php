@@ -2,42 +2,33 @@
 
 namespace NimblePHP\Authorization;
 
+use NimblePHP\Authorization\Middlewares\AuthorizationMiddleware;
+use NimblePHP\Framework\Kernel;
+use NimblePHP\Framework\Module\Interfaces\ModuleInterface;
+use NimblePHP\Framework\Module\Interfaces\ModuleUpdateInterface;
 use krzysztofzylka\DatabaseManager\Exception\ConnectException;
 use krzysztofzylka\DatabaseManager\Exception\DatabaseManagerException;
-use NimblePHP\Authorization\Middlewares\AuthorizationMiddleware;
 use NimblePHP\Framework\Exception\DatabaseException;
 use NimblePHP\Framework\Exception\NimbleException;
-use NimblePHP\Framework\Interfaces\ServiceProviderInterface;
-use NimblePHP\Framework\Interfaces\ServiceProviderUpdateInterface;
-use NimblePHP\Framework\Kernel;
+use NimblePHP\Framework\Translation\Translation;
+use NimblePHP\Framework\Translation\TranslationProviderInterface;
 use NimblePHP\Migrations\Exceptions\MigrationException;
 use NimblePHP\Migrations\Migrations;
 use Throwable;
 
-/**
- * ServiceProvider class - Service provider for Authorization library integration
- * 
- * This class is responsible for:
- * - Running database migrations for Authorization tables
- * - Initializing the Authorization module in NimblePHP framework
- * - Setting up required database schema on application update
- * 
- * @package NimblePHP\Authorization
- */
-class ServiceProvider implements ServiceProviderUpdateInterface, ServiceProviderInterface
+class Module implements ModuleInterface, ModuleUpdateInterface, TranslationProviderInterface
 {
 
-    /**
-     * Register module
-     * @return void
-     */
+    public function getName(): string
+    {
+        return 'Authorization for nimblephp';
+    }
+
     public function register(): void
     {
         Config::init();
 
-        if (isset(Kernel::$middlewareManager)) {
-            Kernel::$middlewareManager->add(new AuthorizationMiddleware(), Config::$middlewarePriority);
-        }
+        Kernel::$middlewareManager->add(new AuthorizationMiddleware(), Config::$middlewarePriority);
     }
 
     /**
@@ -55,6 +46,14 @@ class ServiceProvider implements ServiceProviderUpdateInterface, ServiceProvider
         Config::init();
         $migration = new Migrations(Kernel::$projectPath, __DIR__ . '/Migrations', 'module_authorization');
         $migration->runMigrations();
+    }
+
+    /**
+     * @return void
+     */
+    public function registerTranslations(): void
+    {
+        Translation::getInstance()->addTranslationPath(__DIR__ . '/Lang', Translation::PRIORITY_MODULE);
     }
 
 }
