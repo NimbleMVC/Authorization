@@ -1,0 +1,10 @@
+{
+  "module": {
+    "authorization": {
+      "validation": {
+      },
+      "auth": {
+      }
+    }
+  }
+}

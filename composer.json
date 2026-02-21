@@ -16,8 +16,8 @@
   ],
   "require": {
     "php": ">=8.2",
-    "nimblephp/framework": "^0.3.9",
+    "nimblephp/framework": "^0.4.1",
     "krzysztofzylka/hash": "^2.0",
-    "nimblephp/migrations": "^0.2.3"
+    "nimblephp/migrations": "^0.3.0"
   }
 }
