@@ -2,8 +2,12 @@
 
 namespace NimblePHP\Authorization;
 
+use InvalidArgumentException;
+use NimblePHP\Authorization\Interfaces\OAuthProvider;
 use NimblePHP\Authorization\Interfaces\PasswordHasher;
 use NimblePHP\Authorization\Hashers\DefaultPasswordHasher;
+use NimblePHP\Authorization\Interfaces\TokenProvider;
+use NimblePHP\Authorization\Interfaces\TwoFactorProvider;
 
 /**
  * Config class - Centralized configuration for Authorization library
@@ -59,12 +63,6 @@ class Config
      */
     public static bool $requireAuthByDefault = false;
 
-    /**
-     * Language code for translations (en, pl, etc.)
-     * @var string
-     */
-    public static string $language = 'en';
-
     // ===== Password Hashing Configuration =====
 
     /**
@@ -118,7 +116,7 @@ class Config
 
     /**
      * Array of available 2FA providers
-     * @var array<string, \NimblePHP\Authorization\Interfaces\TwoFactorProvider>
+     * @var array<string, TwoFactorProvider>
      */
     private static array $twoFactorProviders = [];
 
@@ -135,7 +133,7 @@ class Config
 
     /**
      * Array of available OAuth providers
-     * @var array<string, \NimblePHP\Authorization\Interfaces\OAuthProvider>
+     * @var array<string, OAuthProvider>
      */
     private static array $oauthProviders = [];
 
@@ -143,7 +141,7 @@ class Config
 
     /**
      * Array of available token providers (JWT, API Keys, etc.)
-     * @var array<string, \NimblePHP\Authorization\Interfaces\TokenProvider>
+     * @var array<string, TokenProvider>
      */
     private static array $tokenProviders = [];
 
@@ -172,16 +170,12 @@ class Config
         self::$rateLimitEnabled = filter_var($_ENV['AUTHORIZATION_RATE_LIMIT_ENABLED'] ?? true, FILTER_VALIDATE_BOOLEAN);
         self::$rateLimitMaxAttempts = (int)($_ENV['AUTHORIZATION_RATE_LIMIT_MAX_ATTEMPTS'] ?? 5);
         self::$rateLimitLockoutDuration = (int)($_ENV['AUTHORIZATION_RATE_LIMIT_LOCKOUT_DURATION'] ?? 900);
-        self::$language = $_ENV['AUTHORIZATION_LANGUAGE'] ?? 'en';
         self::$columns['id'] = $_ENV['AUTHORIZATION_COLUMN_ID'] ?? 'id';
         self::$columns['username'] = $_ENV['AUTHORIZATION_COLUMN_USERNAME'] ?? 'username';
         self::$columns['email'] = $_ENV['AUTHORIZATION_COLUMN_EMAIL'] ?? 'email';
         self::$columns['password'] = $_ENV['AUTHORIZATION_COLUMN_PASSWORD'] ?? 'password';
         self::$columns['active'] = $_ENV['AUTHORIZATION_COLUMN_ACTIVE'] ?? 'active';
         self::$middlewarePriority = $_ENV['AUTHORIZATION_MIDDLEWARE_PRIORITY'] ?? 255;
-
-        // Initialize language
-        Lang::setLanguage(self::$language);
 
         self::initRbac();
     }
@@ -473,7 +467,7 @@ class Config
      * Register a 2FA provider
      *
      * @param string $name Provider name (e.g., 'totp', 'email')
-     * @param \NimblePHP\Authorization\Interfaces\TwoFactorProvider $provider The provider instance
+     * @param TwoFactorProvider $provider The provider instance
      * @return void
      */
     public static function registerTwoFactorProvider(string $name, $provider): void
@@ -485,7 +479,7 @@ class Config
      * Get a 2FA provider by name
      *
      * @param string $name Provider name
-     * @return \NimblePHP\Authorization\Interfaces\TwoFactorProvider|null The provider or null if not found
+     * @return TwoFactorProvider|null The provider or null if not found
      */
     public static function getTwoFactorProvider(string $name)
     {
@@ -495,7 +489,7 @@ class Config
     /**
      * Get all registered 2FA providers
      *
-     * @return array<string, \NimblePHP\Authorization\Interfaces\TwoFactorProvider>
+     * @return array<string, TwoFactorProvider>
      */
     public static function getTwoFactorProviders(): array
     {
@@ -528,10 +522,10 @@ class Config
      * Registers an OAuth provider implementation for use in authentication flow
      *
      * @param string $name Provider name (e.g., 'github', 'google')
-     * @param \NimblePHP\Authorization\Interfaces\OAuthProvider $provider Provider instance
+     * @param OAuthProvider $provider Provider instance
      * @return void
      */
-    public static function registerOAuthProvider(string $name, \NimblePHP\Authorization\Interfaces\OAuthProvider $provider): void
+    public static function registerOAuthProvider(string $name, OAuthProvider $provider): void
     {
         self::$oauthProviders[$name] = $provider;
     }
@@ -540,13 +534,13 @@ class Config
      * Get OAuth provider by name
      *
      * @param string $name Provider name
-     * @return \NimblePHP\Authorization\Interfaces\OAuthProvider OAuth provider instance
-     * @throws \InvalidArgumentException If provider not registered
+     * @return OAuthProvider OAuth provider instance
+     * @throws InvalidArgumentException If provider not registered
      */
-    public static function getOAuthProvider(string $name): \NimblePHP\Authorization\Interfaces\OAuthProvider
+    public static function getOAuthProvider(string $name): OAuthProvider
     {
         if (!isset(self::$oauthProviders[$name])) {
-            throw new \InvalidArgumentException("OAuth provider '{$name}' is not registered");
+            throw new InvalidArgumentException("OAuth provider '{$name}' is not registered");
         }
 
         return self::$oauthProviders[$name];
@@ -555,7 +549,7 @@ class Config
     /**
      * Get all registered OAuth providers
      *
-     * @return array<string, \NimblePHP\Authorization\Interfaces\OAuthProvider>
+     * @return array<string, OAuthProvider>
      */
     public static function getOAuthProviders(): array
     {
@@ -577,10 +571,10 @@ class Config
      * Register token provider (JWT, API Key, etc.)
      *
      * @param string $name Provider name (e.g., 'jwt', 'api_key')
-     * @param \NimblePHP\Authorization\Interfaces\TokenProvider $provider Provider instance
+     * @param TokenProvider $provider Provider instance
      * @return void
      */
-    public static function registerTokenProvider(string $name, \NimblePHP\Authorization\Interfaces\TokenProvider $provider): void
+    public static function registerTokenProvider(string $name, TokenProvider $provider): void
     {
         self::$tokenProviders[$name] = $provider;
     }
@@ -589,13 +583,13 @@ class Config
      * Get token provider by name
      *
      * @param string $name Provider name
-     * @return \NimblePHP\Authorization\Interfaces\TokenProvider Token provider instance
-     * @throws \InvalidArgumentException If provider not registered
+     * @return TokenProvider Token provider instance
+     * @throws InvalidArgumentException If provider not registered
      */
-    public static function getTokenProvider(string $name): \NimblePHP\Authorization\Interfaces\TokenProvider
+    public static function getTokenProvider(string $name): TokenProvider
     {
         if (!isset(self::$tokenProviders[$name])) {
-            throw new \InvalidArgumentException("Token provider '{$name}' is not registered");
+            throw new InvalidArgumentException("Token provider '{$name}' is not registered");
         }
 
         return self::$tokenProviders[$name];
@@ -604,7 +598,7 @@ class Config
     /**
      * Get all registered token providers
      *
-     * @return array<string, \NimblePHP\Authorization\Interfaces\TokenProvider>
+     * @return array<string, TokenProvider>
      */
     public static function getTokenProviders(): array
     {

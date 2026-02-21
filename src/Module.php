@@ -26,9 +26,9 @@ class Module implements ModuleInterface, ModuleUpdateInterface, TranslationProvi
 
     public function register(): void
     {
-        \NimblePHP\Authorization\Config::init();
+        Config::init();
 
-        Kernel::$middlewareManager->add(new AuthorizationMiddleware(), \NimblePHP\Authorization\Config::$middlewarePriority);
+        Kernel::$middlewareManager->add(new AuthorizationMiddleware(), Config::$middlewarePriority);
     }
 
     /**
@@ -43,7 +43,7 @@ class Module implements ModuleInterface, ModuleUpdateInterface, TranslationProvi
      */
     public function onUpdate(): void
     {
-        \NimblePHP\Authorization\Config::init();
+        Config::init();
         $migration = new Migrations(Kernel::$projectPath, __DIR__ . '/Migrations', 'module_authorization');
         $migration->runMigrations();
     }

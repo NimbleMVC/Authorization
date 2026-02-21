@@ -15,15 +15,16 @@ use NimblePHP\Authorization\Interfaces\OAuthProvider;
 use NimblePHP\Authorization\Interfaces\TokenProvider;
 use NimblePHP\Framework\Kernel;
 use NimblePHP\Framework\Session;
+use NimblePHP\Framework\Translation\Translation;
 
 /**
  * Authorization class - Main authorization service for user authentication and authorization
- * 
+ *
  * This class provides methods for:
  * - User authentication (login/logout/register)
  * - Permission and role checking
  * - Session management for authenticated users
- * 
+ *
  * @package NimblePHP\Authorization
  */
 class Authorization
@@ -100,28 +101,28 @@ class Authorization
     {
         if (Config::isUsernameAuth()) {
             if (empty(trim($username))) {
-                throw new ValidationException(Lang::get('validation.username_empty'));
+                throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.username_empty'));
             }
 
             if ($this->account->userExists(identifier: $username)) {
-                throw new ValidationException(Lang::get('validation.username_exists'));
+                throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.username_exists'));
             }
         } elseif (Config::isEmailAuth()) {
             if (empty(trim($email))) {
-                throw new ValidationException(Lang::get('validation.email_empty'));
+                throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.email_empty'));
             }
 
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                throw new ValidationException(Lang::get('validation.email_invalid'));
+                throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.email_invalid'));
             }
 
             if ($this->account->emailExists($email)) {
-                throw new ValidationException(Lang::get('validation.email_exists'));
+                throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.email_exists'));
             }
         }
 
         if (strlen($password) < 6) {
-            throw new ValidationException(Lang::get('validation.password_too_short'));
+            throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.password_too_short'));
         }
 
         // Hash password using configured hasher
@@ -155,24 +156,24 @@ class Authorization
     {
         if (empty(trim($login))) {
             $field = Config::isEmailAuth() ? 'Email' : 'Username';
-            throw new ValidationException(Lang::get('validation.login_empty', ['field' => $field]));
+            throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.login_empty', ['field' => $field]));
         }
 
         if (empty($password)) {
-            throw new ValidationException(Lang::get('validation.password_empty'));
+            throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.password_empty'));
         }
 
         // Check rate limiting
         if (Config::isRateLimitEnabled() && $this->rateLimiter->isRateLimited($login)) {
             $remaining = $this->rateLimiter->getLockoutTimeRemaining($login);
-            throw new RateLimitExceededException(Lang::get('validation.rate_limit_exceeded', ['seconds' => $remaining]), $remaining);
+            throw new RateLimitExceededException(Translation::getInstance()->translate('module.authorization.validation.rate_limit_exceeded', ['seconds' => $remaining]), $remaining);
         }
 
         $conditions = [];
 
         if (Config::isEmailAuth()) {
             if (!filter_var($login, FILTER_VALIDATE_EMAIL)) {
-                throw new ValidationException(Lang::get('validation.email_invalid'));
+                throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.email_invalid'));
             }
 
             $conditions[Config::getColumn('email')] = $login;
@@ -187,7 +188,7 @@ class Authorization
             if (Config::isRateLimitEnabled()) {
                 $this->rateLimiter->recordFailedAttempt($login);
             }
-            throw new ValidationException(Lang::get('validation.invalid_credentials'));
+            throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.invalid_credentials'));
         }
 
         if (!VersionedHasher::verify($account[Config::$tableName][Config::getColumn('password')], $password)) {
@@ -195,7 +196,7 @@ class Authorization
             if (Config::isRateLimitEnabled()) {
                 $this->rateLimiter->recordFailedAttempt($login);
             }
-            throw new ValidationException(Lang::get('validation.invalid_credentials'));
+            throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.invalid_credentials'));
         }
 
         if (Config::isActivationRequired() && empty($account[Config::$tableName][Config::getColumn('active')])) {
@@ -203,7 +204,7 @@ class Authorization
             if (Config::isRateLimitEnabled()) {
                 $this->rateLimiter->recordFailedAttempt($login);
             }
-            throw new ValidationException(Lang::get('validation.account_not_activated'));
+            throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.account_not_activated'));
         }
 
         $this->account->setId($account[Config::$tableName][Config::getColumn('id')]);
@@ -223,13 +224,13 @@ class Authorization
         $tableName = Config::$tableName;
         $secret = $account[$tableName][Config::getTwoFactorSecretColumn()] ?? null;
         $provider = $account[$tableName][Config::getTwoFactorProviderColumn()] ?? null;
-        
+
         if (!empty($secret) && !empty($provider)) {
             // User has 2FA enabled - store user ID temporarily and throw exception
             $userId = (int)$account[$tableName][Config::getColumn('id')];
             $this->session->set(Config::$twoFactorSessionKey, $userId);
             $this->session->set(Config::$twoFactorProviderSessionKey, $provider);
-            throw new PendingTwoFactorException($userId, $provider, Lang::get('validation.two_factor_required'));
+            throw new PendingTwoFactorException($userId, $provider, Translation::getInstance()->translate('module.authorization.validation.two_factor_required'));
         }
 
         $this->session->set(Config::$sessionKey, $account[Config::$tableName][Config::getColumn('id')]);
@@ -259,7 +260,7 @@ class Authorization
                 header('HTTP/1.1 401 Unauthorized');
                 header('WWW-Authenticate: Basic realm="' . Config::$authType . '"');
             }
-            throw new ValidationException(Lang::get('validation.authorization_header_missing'));
+            throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.authorization_header_missing'));
         }
 
         if (strpos($authHeader, 'Basic ') !== 0) {
@@ -281,7 +282,7 @@ class Authorization
         list($login, $password) = $parts;
 
         if (empty($login) || empty($password)) {
-            throw new ValidationException(Lang::get('validation.credentials_empty'));
+            throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.credentials_empty'));
         }
 
         try {
@@ -321,7 +322,7 @@ class Authorization
     public function enableTwoFactorAuth(TwoFactorProvider $provider): array
     {
         if (!$this->isAuthorized()) {
-            throw new InvalidArgumentException(Lang::get('auth.user_must_be_authenticated_2fa_enable'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..user_must_be_authenticated_2fa_enable'));
         }
 
         $userId = $this->getAuthorizedId();
@@ -340,10 +341,10 @@ class Authorization
         // Generate QR code for TOTP provider
         if (method_exists($provider, 'getQRCodeImageURL')) {
             $user = $this->account->find([Config::getColumn('id') => $userId]);
-            $userIdentifier = Config::isEmailAuth() 
-                ? $user[Config::$tableName][Config::getColumn('email')] 
+            $userIdentifier = Config::isEmailAuth()
+                ? $user[Config::$tableName][Config::getColumn('email')]
                 : $user[Config::$tableName][Config::getColumn('username')];
-            
+
             $result['qr_code'] = $provider->getQRCodeImageURL($secret, $userIdentifier);
         }
 
@@ -367,7 +368,7 @@ class Authorization
     {
         // Check if there's a pending 2FA verification
         if (!$this->session->exists(Config::$twoFactorSessionKey)) {
-            throw new InvalidArgumentException(Lang::get('auth.no_pending_2fa'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..no_pending_2fa'));
         }
 
         $pendingUserId = $this->session->get(Config::$twoFactorSessionKey);
@@ -375,13 +376,13 @@ class Authorization
 
         // Verify the user ID matches if provided
         if ($userId !== null && (int)$userId !== $pendingUserId) {
-            throw new InvalidArgumentException(Lang::get('auth.user_id_mismatch'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..user_id_mismatch'));
         }
 
         // Get the 2FA provider
         $provider = Config::getTwoFactorProvider($providerName);
         if (!$provider) {
-            throw new InvalidArgumentException(Lang::get('auth.2fa_provider_not_configured', ['provider' => $providerName]));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..2fa_provider_not_configured', ['provider' => $providerName]));
         }
 
         // Get user's 2FA secret
@@ -391,7 +392,7 @@ class Authorization
         if (!$userAccount) {
             $this->session->remove(Config::$twoFactorSessionKey);
             $this->session->remove(Config::$twoFactorProviderSessionKey);
-            throw new InvalidArgumentException(Lang::get('auth.user_not_found'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..user_not_found'));
         }
 
         $secret = $userAccount[Config::$tableName][Config::getTwoFactorSecretColumn()] ?? null;
@@ -399,14 +400,14 @@ class Authorization
         if (!$secret) {
             $this->session->remove(Config::$twoFactorSessionKey);
             $this->session->remove(Config::$twoFactorProviderSessionKey);
-            throw new InvalidArgumentException(Lang::get('auth.2fa_not_enabled'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..2fa_not_enabled'));
         }
 
         // Verify the code
         if (!$provider->verify($secret, $code)) {
             // Check if it's a recovery code
             if (!$provider->verifyRecoveryCode($secret, $code)) {
-                throw new TwoFactorException(Lang::get('validation.invalid_2fa_code'));
+                throw new TwoFactorException(Translation::getInstance()->translate('module.authorization.validation.invalid_2fa_code'));
             }
         }
 
@@ -428,7 +429,7 @@ class Authorization
     public function disableTwoFactorAuth(): bool
     {
         if (!$this->isAuthorized()) {
-            throw new InvalidArgumentException(Lang::get('auth.user_must_be_authenticated_2fa_disable'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..user_must_be_authenticated_2fa_disable'));
         }
 
         $userId = $this->getAuthorizedId();
@@ -727,9 +728,9 @@ class Authorization
 
     /**
      * Get remaining login attempts for identifier
-     * 
+     *
      * Used to display attempt count to user during login process
-     * 
+     *
      * @param string $identifier Username or email
      * @return int Remaining attempts before lockout
      */
@@ -744,9 +745,9 @@ class Authorization
 
     /**
      * Get lockout time remaining for identifier
-     * 
+     *
      * Used to display lockout duration to user
-     * 
+     *
      * @param string $identifier Username or email
      * @return int Seconds remaining in lockout (0 if not locked)
      */
@@ -761,7 +762,7 @@ class Authorization
 
     /**
      * Check if login is rate limited for identifier
-     * 
+     *
      * @param string $identifier Username or email
      * @return bool True if rate limited, false otherwise
      */
@@ -776,7 +777,7 @@ class Authorization
 
     /**
      * Get OAuth provider by name
-     * 
+     *
      * @param string $name Provider name (e.g., 'github')
      * @return OAuthProvider OAuth provider instance
      * @throws InvalidArgumentException If provider not registered
@@ -788,9 +789,9 @@ class Authorization
 
     /**
      * Initiate OAuth login flow
-     * 
+     *
      * Generates authorization URL and saves state for validation
-     * 
+     *
      * @param string $providerName OAuth provider name
      * @param string $redirectUri Callback URL
      * @return string Authorization URL to redirect user to
@@ -800,18 +801,18 @@ class Authorization
     {
         $provider = $this->getOAuthProvider($providerName);
         $authUrl = $provider->getAuthorizationUrl($redirectUri);
-        
+
         $this->session->set('oauth_provider', $providerName);
         $this->session->set('oauth_redirect_uri', $redirectUri);
-        
+
         return $authUrl;
     }
 
     /**
      * Handle OAuth callback from provider
-     * 
+     *
      * Exchanges authorization code for access token and retrieves user data
-     * 
+     *
      * @param string $code Authorization code from provider
      * @param string $providerName OAuth provider name
      * @return array User data from OAuth provider
@@ -822,26 +823,26 @@ class Authorization
     {
         $provider = $this->getOAuthProvider($providerName);
         $redirectUri = $this->session->get('oauth_redirect_uri');
-        
+
         if (!$redirectUri) {
             throw new \Exception('OAuth session expired. Please try again.');
         }
-        
+
         $accessToken = $provider->exchangeCodeForToken($code, $redirectUri);
         $userData = $provider->getUserData($accessToken);
-        
+
         $this->session->remove('oauth_provider');
         $this->session->remove('oauth_redirect_uri');
-        
+
         return array_merge($userData, ['provider' => $providerName]);
     }
 
     /**
      * Login user via OAuth provider
-     * 
+     *
      * Creates account if user doesn't exist, or logs in existing user
      * Supports account linking via email matching
-     * 
+     *
      * @param array $oauthData User data from OAuth provider (must include: oauth_id, email, username, provider)
      * @param bool $createIfNotExists Create account if user doesn't exist (default: true)
      * @return bool True if login successful
@@ -852,20 +853,20 @@ class Authorization
         $tableName = Config::getTableName();
         $oauthIdColumn = Config::getOAuthColumn('id');
         $oauthProviderColumn = Config::getOAuthColumn('provider');
-        
+
         $accountTable = new Table($tableName);
-        
+
         $existingUser = $accountTable->findByField($oauthIdColumn, $oauthData['oauth_id']);
-        
+
         if (!$existingUser) {
             $existingUser = $accountTable->findByField('email', $oauthData['email'] ?? '');
         }
-        
+
         if (!$existingUser) {
             if (!$createIfNotExists) {
                 throw new \Exception('User not found and account creation is disabled.');
             }
-            
+
             $accountData = [
                 'username' => $oauthData['username'],
                 'email' => $oauthData['email'] ?? '',
@@ -875,27 +876,27 @@ class Authorization
                 'active' => 1,
                 'created_at' => date('Y-m-d H:i:s')
             ];
-            
+
             $accountTable->insert($accountData);
             $existingUser = $accountTable->findByField('email', $oauthData['email'] ?? '');
         } else {
             $userId = $existingUser[$tableName][Config::getAccountColumn('id')];
             $this->account->updateOAuthData($userId, $oauthData['oauth_id'], $oauthData['provider']);
         }
-        
+
         if (!$existingUser) {
             throw new \Exception('Failed to create or retrieve user account.');
         }
-        
+
         $userId = $existingUser[$tableName][Config::getAccountColumn('id')];
         $this->session->set(Config::getSessionKey(), $userId);
-        
+
         return true;
     }
 
     /**
      * Get registered token provider by type
-     * 
+     *
      * @param string $type Provider type (e.g., 'jwt', 'api_key')
      * @return TokenProvider Token provider instance
      * @throws InvalidArgumentException If provider not registered
@@ -907,7 +908,7 @@ class Authorization
 
     /**
      * Generate token for authenticated user
-     * 
+     *
      * @param int $userId User ID
      * @param string $tokenType Token type (jwt, api_key)
      * @param array $claims Additional claims/metadata
@@ -923,7 +924,7 @@ class Authorization
 
     /**
      * Validate token and get token data
-     * 
+     *
      * @param string $token Token to validate
      * @param string $tokenType Expected token type
      * @return array Token data
@@ -937,9 +938,9 @@ class Authorization
 
     /**
      * Authenticate user with token
-     * 
+     *
      * Validates token and sets session with user ID
-     * 
+     *
      * @param string $token Token to validate
      * @param string $tokenType Token type
      * @return bool True if authentication successful
@@ -959,7 +960,7 @@ class Authorization
 
     /**
      * Revoke token
-     * 
+     *
      * @param string $token Token to revoke
      * @param string $tokenType Token type
      * @return bool True if revocation successful

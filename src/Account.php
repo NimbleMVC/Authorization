@@ -9,14 +9,14 @@ use NimblePHP\Framework\Kernel;
 
 /**
  * Account class - Handles user account operations and database interactions
- * 
+ *
  * This class provides methods for:
  * - User account data management
  * - Account activation/deactivation
  * - Role and permission assignment
  * - Password management
  * - Account queries and lookups
- * 
+ *
  * @package NimblePHP\Authorization
  */
 class Account
@@ -185,7 +185,7 @@ class Account
     {
         $passwordHasher = Config::getPasswordHasher();
         $hashedPassword = $passwordHasher->hash($password);
-        
+
         return $this->update([Config::getColumn('password') => $hashedPassword]);
     }
 
@@ -601,6 +601,7 @@ class Account
         }
 
         $account = $this->find([Config::getColumn('id') => $userId]);
+
         if (!$account) {
             return null;
         }
@@ -624,6 +625,7 @@ class Account
         }
 
         $account = $this->find([Config::getColumn('id') => $userId]);
+
         if (!$account) {
             return null;
         }
