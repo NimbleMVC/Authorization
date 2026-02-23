@@ -26,6 +26,36 @@
         "2fa_provider_not_configured":  "2FA provider not configured: {provider}",
         "user_not_found":  "User not found",
         "2fa_not_enabled":  "2FA not enabled for user"
+      },
+      "errors": {
+        "invalid_authorization_header_format": "Invalid Authorization header format",
+        "invalid_base64_encoding": "Invalid base64 encoding in Authorization header",
+        "invalid_credentials_format": "Invalid credentials format in Authorization header",
+        "oauth_session_expired": "OAuth session expired. Please try again.",
+        "user_account_creation_disabled": "User not found and account creation is disabled.",
+        "failed_create_user_account": "Failed to create or retrieve user account.",
+        "jwt_secret_too_short": "Secret key must be at least 32 characters long for security",
+        "jwt_invalid_format": "Invalid JWT token format",
+        "jwt_invalid_signature": "Invalid JWT signature",
+        "jwt_invalid_payload": "Invalid JWT payload",
+        "jwt_expired": "JWT token has expired",
+        "jwt_revoked": "JWT token has been revoked",
+        "jwt_missing_user_id": "JWT token missing user_id claim",
+        "apikey_invalid_format": "Invalid API key format",
+        "apikey_not_found": "API key not found or invalid",
+        "apikey_inactive": "API key is inactive",
+        "apikey_expired": "API key has expired",
+        "permission_name_empty": "Permission name cannot be empty",
+        "permission_already_exists": "Permission already exists",
+        "role_name_empty": "Role name cannot be empty",
+        "role_already_exists": "Role already exists",
+        "bcrypt_invalid_cost": "Cost must be between 4 and 31",
+        "identifier_empty": "Identifier cannot be empty",
+        "user_missing_role": "User does not have required role: {role}",
+        "user_missing_all_roles": "User does not have all of the required roles: {roles}",
+        "user_missing_permission": "User does not have required permission: {permission}",
+        "user_missing_any_permission": "User does not have any of the required permissions: {permissions}",
+        "user_missing_any_role": "User does not have any of the required roles: {roles}"
       }
     }
   }

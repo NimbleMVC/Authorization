@@ -26,6 +26,36 @@
         "2fa_provider_not_configured": "Dostawca 2FA nie jest skonfigurowany: {provider}",
         "user_not_found": "Nie znaleziono użytkownika",
         "2fa_not_enabled": "2FA nie jest włączone dla użytkownika"
+      },
+      "errors": {
+        "invalid_authorization_header_format": "Nieprawidłowy format nagłówka autoryzacji",
+        "invalid_base64_encoding": "Nieprawidłowe kodowanie base64 w nagłówku autoryzacji",
+        "invalid_credentials_format": "Nieprawidłowy format danych uwierzytelniających w nagłówku autoryzacji",
+        "oauth_session_expired": "Sesja OAuth wygasła. Spróbuj ponownie.",
+        "user_account_creation_disabled": "Nie znaleziono użytkownika, a tworzenie konta jest wyłączone.",
+        "failed_create_user_account": "Nie udało się utworzyć lub pobrać konta użytkownika.",
+        "jwt_secret_too_short": "Klucz tajny musi mieć co najmniej 32 znaki dla bezpieczeństwa",
+        "jwt_invalid_format": "Nieprawidłowy format tokenu JWT",
+        "jwt_invalid_signature": "Nieprawidłowy podpis JWT",
+        "jwt_invalid_payload": "Nieprawidłowy ładunek JWT",
+        "jwt_expired": "Token JWT wygasł",
+        "jwt_revoked": "Token JWT został odwołany",
+        "jwt_missing_user_id": "Token JWT brakuje roszczenia user_id",
+        "apikey_invalid_format": "Nieprawidłowy format klucza API",
+        "apikey_not_found": "Klucz API nie znaleziony lub nieprawidłowy",
+        "apikey_inactive": "Klucz API jest nieaktywny",
+        "apikey_expired": "Klucz API wygasł",
+        "permission_name_empty": "Nazwa uprawnienia nie może być pusta",
+        "permission_already_exists": "Uprawnienie już istnieje",
+        "role_name_empty": "Nazwa roli nie może być pusta",
+        "role_already_exists": "Rola już istnieje",
+        "bcrypt_invalid_cost": "Koszt musi być między 4 a 31",
+        "identifier_empty": "Identyfikator nie może być pusty",
+        "user_missing_role": "Użytkownik nie ma wymaganej roli: {role}",
+        "user_missing_all_roles": "Użytkownik nie ma wszystkich wymaganych ról: {roles}",
+        "user_missing_permission": "Użytkownik nie ma wymaganego uprawnienia: {permission}",
+        "user_missing_any_permission": "Użytkownik nie ma żadnego z wymaganych uprawnień: {permissions}",
+        "user_missing_any_role": "Użytkownik nie ma żadnej z wymaganych ról: {roles}"
       }
     }
   }

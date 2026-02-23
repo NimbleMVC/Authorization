@@ -3,6 +3,7 @@
 namespace NimblePHP\Authorization\Hashers;
 
 use NimblePHP\Authorization\Interfaces\PasswordHasher;
+use NimblePHP\Framework\Translation\Translation;
 
 /**
  * BcryptPasswordHasher - Implementation using PHP's password_hash with bcrypt
@@ -35,7 +36,7 @@ class BcryptPasswordHasher implements PasswordHasher
     public function __construct(int $cost = 12)
     {
         if ($cost < 4 || $cost > 31) {
-            throw new \InvalidArgumentException('Cost must be between 4 and 31');
+            throw new \InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.bcrypt_invalid_cost'));
         }
         $this->cost = $cost;
     }
@@ -87,7 +88,7 @@ class BcryptPasswordHasher implements PasswordHasher
     public function setCost(int $cost): void
     {
         if ($cost < 4 || $cost > 31) {
-            throw new \InvalidArgumentException('Cost must be between 4 and 31');
+            throw new \InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.bcrypt_invalid_cost'));
         }
         $this->cost = $cost;
     }

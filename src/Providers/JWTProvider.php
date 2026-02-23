@@ -5,6 +5,7 @@ namespace NimblePHP\Authorization\Providers;
 use NimblePHP\Authorization\Interfaces\TokenProvider;
 use krzysztofzylka\DatabaseManager\Table;
 use NimblePHP\Authorization\Config;
+use NimblePHP\Framework\Translation\Translation;
 
 /**
  * JWT (JSON Web Token) provider for stateless token-based authentication
@@ -32,7 +33,7 @@ class JWTProvider implements TokenProvider
         int $defaultExpirationTime = 3600
     ) {
         if (strlen($secret) < 32) {
-            throw new \InvalidArgumentException('Secret key must be at least 32 characters long for security');
+            throw new \InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.jwt_secret_too_short'));
         }
 
         $this->secret = $secret;
@@ -88,7 +89,7 @@ class JWTProvider implements TokenProvider
         $parts = explode('.', $token);
 
         if (count($parts) !== 3) {
-            throw new \Exception('Invalid JWT token format');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.jwt_invalid_format'));
         }
 
         [$headerEncoded, $payloadEncoded, $signatureEncoded] = $parts;
@@ -99,28 +100,28 @@ class JWTProvider implements TokenProvider
         );
 
         if (!hash_equals($signatureEncoded, $expectedSignature)) {
-            throw new \Exception('Invalid JWT signature');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.jwt_invalid_signature'));
         }
 
         // Decode payload
         $payload = json_decode($this->base64UrlDecode($payloadEncoded), true);
 
         if (!is_array($payload)) {
-            throw new \Exception('Invalid JWT payload');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.jwt_invalid_payload'));
         }
 
         // Check expiration
         if (isset($payload['exp']) && $payload['exp'] < time()) {
-            throw new \Exception('JWT token has expired');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.jwt_expired'));
         }
 
         // Check if revoked
         if (isset($payload['jti']) && $this->isTokenRevoked($token)) {
-            throw new \Exception('JWT token has been revoked');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.jwt_revoked'));
         }
 
         if (!isset($payload['user_id'])) {
-            throw new \Exception('JWT token missing user_id claim');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.jwt_missing_user_id'));
         }
 
         return $payload;

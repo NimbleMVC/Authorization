@@ -5,6 +5,7 @@ namespace NimblePHP\Authorization\Attributes;
 use Attribute;
 use NimblePHP\Authorization\Authorization;
 use NimblePHP\Authorization\Exceptions\UnauthorizedException;
+use NimblePHP\Framework\Translation\Translation;
 
 /**
  * HasAllRoles attribute - Checks if user has all of the specified roles
@@ -49,7 +50,7 @@ class HasAllRoles
         $authorization = new Authorization();
 
         if (!$authorization->hasAllRoles($this->roles)) {
-            throw new UnauthorizedException("User does not have all of the required roles: " . implode(', ', $this->roles));
+            throw new UnauthorizedException(Translation::getInstance()->translate('module.authorization.errors.user_missing_all_roles', ['roles' => implode(', ', $this->roles)]));
         }
     }
 

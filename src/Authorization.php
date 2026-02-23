@@ -264,19 +264,19 @@ class Authorization
         }
 
         if (strpos($authHeader, 'Basic ') !== 0) {
-            throw new InvalidArgumentException('Invalid Authorization header format');
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.invalid_authorization_header_format'));
         }
 
         $credentials = base64_decode(substr($authHeader, 6), true);
 
         if ($credentials === false) {
-            throw new InvalidArgumentException('Invalid base64 encoding in Authorization header');
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.invalid_base64_encoding'));
         }
 
         $parts = explode(':', $credentials, 2);
 
         if (count($parts) !== 2) {
-            throw new InvalidArgumentException('Invalid credentials format in Authorization header');
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.invalid_credentials_format'));
         }
 
         list($login, $password) = $parts;
@@ -322,7 +322,7 @@ class Authorization
     public function enableTwoFactorAuth(TwoFactorProvider $provider): array
     {
         if (!$this->isAuthorized()) {
-            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..user_must_be_authenticated_2fa_enable'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth.user_must_be_authenticated_2fa_enable'));
         }
 
         $userId = $this->getAuthorizedId();
@@ -368,7 +368,7 @@ class Authorization
     {
         // Check if there's a pending 2FA verification
         if (!$this->session->exists(Config::$twoFactorSessionKey)) {
-            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..no_pending_2fa'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth.no_pending_2fa'));
         }
 
         $pendingUserId = $this->session->get(Config::$twoFactorSessionKey);
@@ -376,13 +376,13 @@ class Authorization
 
         // Verify the user ID matches if provided
         if ($userId !== null && (int)$userId !== $pendingUserId) {
-            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..user_id_mismatch'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth.user_id_mismatch'));
         }
 
         // Get the 2FA provider
         $provider = Config::getTwoFactorProvider($providerName);
         if (!$provider) {
-            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..2fa_provider_not_configured', ['provider' => $providerName]));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth.2fa_provider_not_configured', ['provider' => $providerName]));
         }
 
         // Get user's 2FA secret
@@ -392,7 +392,7 @@ class Authorization
         if (!$userAccount) {
             $this->session->remove(Config::$twoFactorSessionKey);
             $this->session->remove(Config::$twoFactorProviderSessionKey);
-            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..user_not_found'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth.user_not_found'));
         }
 
         $secret = $userAccount[Config::$tableName][Config::getTwoFactorSecretColumn()] ?? null;
@@ -400,7 +400,7 @@ class Authorization
         if (!$secret) {
             $this->session->remove(Config::$twoFactorSessionKey);
             $this->session->remove(Config::$twoFactorProviderSessionKey);
-            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..2fa_not_enabled'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth.2fa_not_enabled'));
         }
 
         // Verify the code
@@ -429,7 +429,7 @@ class Authorization
     public function disableTwoFactorAuth(): bool
     {
         if (!$this->isAuthorized()) {
-            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth..user_must_be_authenticated_2fa_disable'));
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth.user_must_be_authenticated_2fa_disable'));
         }
 
         $userId = $this->getAuthorizedId();
@@ -825,7 +825,7 @@ class Authorization
         $redirectUri = $this->session->get('oauth_redirect_uri');
 
         if (!$redirectUri) {
-            throw new \Exception('OAuth session expired. Please try again.');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.oauth_session_expired'));
         }
 
         $accessToken = $provider->exchangeCodeForToken($code, $redirectUri);
@@ -864,7 +864,7 @@ class Authorization
 
         if (!$existingUser) {
             if (!$createIfNotExists) {
-                throw new \Exception('User not found and account creation is disabled.');
+                throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.user_account_creation_disabled'));
             }
 
             $accountData = [
@@ -885,7 +885,7 @@ class Authorization
         }
 
         if (!$existingUser) {
-            throw new \Exception('Failed to create or retrieve user account.');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.failed_create_user_account'));
         }
 
         $userId = $existingUser[$tableName][Config::getAccountColumn('id')];

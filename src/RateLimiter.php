@@ -5,6 +5,7 @@ namespace NimblePHP\Authorization;
 use InvalidArgumentException;
 use NimblePHP\Framework\Kernel;
 use NimblePHP\Framework\Session;
+use NimblePHP\Framework\Translation\Translation;
 
 /**
  * RateLimiter class - Protects against brute force attacks using rate limiting
@@ -160,7 +161,7 @@ class RateLimiter
     private function getSessionKey(string $identifier): string
     {
         if (empty(trim($identifier))) {
-            throw new InvalidArgumentException('Identifier cannot be empty');
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.identifier_empty'));
         }
 
         return $this->sessionKeyPrefix . md5($identifier);
