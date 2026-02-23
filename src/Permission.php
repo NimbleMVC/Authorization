@@ -5,6 +5,7 @@ namespace NimblePHP\Authorization;
 use InvalidArgumentException;
 use krzysztofzylka\DatabaseManager\Exception\DatabaseManagerException;
 use krzysztofzylka\DatabaseManager\Table;
+use NimblePHP\Framework\Translation\Translation;
 
 /**
  * Permission class - Manages user permissions and permission-based access control
@@ -102,11 +103,11 @@ class Permission
     public function create(string $name, ?string $description = null, ?string $group = null): bool
     {
         if (empty(trim($name))) {
-            throw new InvalidArgumentException('Permission name cannot be empty');
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.permission_name_empty'));
         }
 
         if ($this->permissionExists($name)) {
-            throw new InvalidArgumentException('Permission already exists');
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.permission_already_exists'));
         }
 
         $data = [

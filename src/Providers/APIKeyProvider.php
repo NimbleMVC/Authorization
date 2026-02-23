@@ -5,6 +5,7 @@ namespace NimblePHP\Authorization\Providers;
 use NimblePHP\Authorization\Interfaces\TokenProvider;
 use krzysztofzylka\DatabaseManager\Table;
 use NimblePHP\Authorization\Config;
+use NimblePHP\Framework\Translation\Translation;
 
 /**
  * API Keys provider for stateful token-based authentication
@@ -72,14 +73,14 @@ class APIKeyProvider implements TokenProvider
     public function validateToken(string $token): array
     {
         if (!preg_match('/^sk_[a-f0-9]{48}$/', $token)) {
-            throw new \Exception('Invalid API key format');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.apikey_invalid_format'));
         }
 
         $keyHash = hash('sha256', $token);
         $keyData = $this->keysTable->findByField('key_hash', $keyHash);
 
         if (!$keyData) {
-            throw new \Exception('API key not found or invalid');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.apikey_not_found'));
         }
 
         $tableName = 'account_api_keys';
@@ -87,12 +88,12 @@ class APIKeyProvider implements TokenProvider
 
         // Check if active
         if (!$keyRecord['is_active']) {
-            throw new \Exception('API key is inactive');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.apikey_inactive'));
         }
 
         // Check expiration
         if ($keyRecord['expires_at'] && strtotime($keyRecord['expires_at']) < time()) {
-            throw new \Exception('API key has expired');
+            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.apikey_expired'));
         }
 
         // Update last used timestamp

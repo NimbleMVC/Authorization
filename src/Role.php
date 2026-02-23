@@ -5,6 +5,7 @@ namespace NimblePHP\Authorization;
 use InvalidArgumentException;
 use krzysztofzylka\DatabaseManager\Exception\DatabaseManagerException;
 use krzysztofzylka\DatabaseManager\Table;
+use NimblePHP\Framework\Translation\Translation;
 
 /**
  * Role class - Manages user roles and role-based access control
@@ -115,11 +116,11 @@ class Role
     public function create(string $name, ?string $description = null): bool
     {
         if (empty(trim($name))) {
-            throw new InvalidArgumentException('Role name cannot be empty');
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.role_name_empty'));
         }
 
         if ($this->roleExists($name)) {
-            throw new InvalidArgumentException('Role already exists');
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.role_already_exists'));
         }
 
         $data = [

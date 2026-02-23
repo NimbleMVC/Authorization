@@ -5,6 +5,7 @@ namespace NimblePHP\Authorization\Attributes;
 use Attribute;
 use NimblePHP\Authorization\Authorization;
 use NimblePHP\Authorization\Exceptions\UnauthorizedException;
+use NimblePHP\Framework\Translation\Translation;
 
 /**
  * HasPermission attribute - Checks if user has specific permission
@@ -49,7 +50,7 @@ class HasPermission
         $authorization = new Authorization();
 
         if (!$authorization->hasPermission($this->permission)) {
-            throw new UnauthorizedException("User does not have required permission: {$this->permission}");
+            throw new UnauthorizedException(Translation::getInstance()->translate('module.authorization.errors.user_missing_permission', ['permission' => $this->permission]));
         }
     }
 
