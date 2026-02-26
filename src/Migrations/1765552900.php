@@ -15,19 +15,8 @@ return new class extends AbstractMigration {
     private function addTwoFactorColumnsToAccounts(): void
     {
         $alter = new AlterTable(\NimblePHP\Authorization\Config::$tableName);
-
-        $secretColumn = new Column();
-        $secretColumn->setName('account_two_factor_secret');
-        $secretColumn->setType(ColumnType::varchar, 255);
-        $secretColumn->setNull(true);
-        $alter->addColumn($secretColumn);
-
-        $providerColumn = new Column();
-        $providerColumn->setName('account_two_factor_provider');
-        $providerColumn->setType(ColumnType::varchar, 50);
-        $providerColumn->setNull(true);
-        $alter->addColumn($providerColumn);
-
+        $alter->addColumn(Column::create('account_two_factor_secret', ColumnType::varchar, 255)->setNull(true));
+        $alter->addColumn(Column::create('account_two_factor_provider', ColumnType::varchar, 50)->setNull(true));
         $alter->execute();
     }
 };

@@ -24,31 +24,12 @@ return new class extends AbstractMigration {
         }
 
         $create = new CreateTable('account_token_blacklist');
-
-        $id = new Column();
-        $id->setName('id');
-        $id->setType(ColumnType::int);
-        $id->setAutoIncrement(true);
-        $id->setPrimary(true);
-        $create->addColumn($id);
-
-        $jti = new Column();
-        $jti->setName('token_jti');
-        $jti->setType(ColumnType::varchar, 255);
-        $jti->setNull(false);
-        $create->addColumn($jti);
-
-        $type = new Column();
-        $type->setName('token_type');
-        $type->setType(ColumnType::varchar, 50);
-        $type->setNull(false);
-        $create->addColumn($type);
-
-        $revoked = new Column();
-        $revoked->setName('revoked_at');
-        $revoked->setType(ColumnType::datetime);
-        $create->addColumn($revoked);
-
+        $create->addIdColumn();
+        $create->addSimpleVarcharColumn('token_jti');
+        $create->addSimpleVarcharColumn('token_type', 50);
+        $create->addColumn(Column::create('revoked_at', ColumnType::datetime, null));
+        $create->addDateModifyColumn();
+        $create->addDateCreatedColumn();
         $create->execute();
     }
 
@@ -61,66 +42,19 @@ return new class extends AbstractMigration {
         }
 
         $create = new CreateTable('account_api_keys');
-
-        $id = new Column();
-        $id->setName('id');
-        $id->setType(ColumnType::int);
-        $id->setAutoIncrement(true);
-        $id->setPrimary(true);
-        $create->addColumn($id);
-
-        $userId = new Column();
-        $userId->setName('user_id');
-        $userId->setType(ColumnType::int);
-        $userId->setNull(false);
-        $create->addColumn($userId);
-
-        $hash = new Column();
-        $hash->setName('key_hash');
-        $hash->setType(ColumnType::varchar, 64);
-        $hash->setNull(false);
-        $create->addColumn($hash);
-
-        $name = new Column();
-        $name->setName('key_name');
-        $name->setType(ColumnType::varchar, 255);
-        $create->addColumn($name);
-
-        $scopes = new Column();
-        $scopes->setName('scopes');
-        $scopes->setType(ColumnType::text);
-        $scopes->setNull(true);
-        $create->addColumn($scopes);
-
-        $limit = new Column();
-        $limit->setName('rate_limit');
-        $limit->setType(ColumnType::int);
-        $limit->setDefault(1000);
-        $create->addColumn($limit);
-
-        $created = new Column();
-        $created->setName('created_at');
-        $created->setType(ColumnType::datetime);
-        $create->addColumn($created);
-
-        $expires = new Column();
-        $expires->setName('expires_at');
-        $expires->setType(ColumnType::datetime);
-        $expires->setNull(true);
-        $create->addColumn($expires);
-
-        $lastUsed = new Column();
-        $lastUsed->setName('last_used_at');
-        $lastUsed->setType(ColumnType::datetime);
-        $lastUsed->setNull(true);
-        $create->addColumn($lastUsed);
-
-        $active = new Column();
-        $active->setName('is_active');
-        $active->setType(ColumnType::tinyint);
-        $active->setDefault(1);
-        $create->addColumn($active);
-
+        $create->addIdColumn();
+        $create->addcolumn(Column::create('user_id', ColumnType::bigint, null)->setUnsigned(true));
+        $create->addSimpleVarcharColumn('key_hash', 64, false);
+        $create->addSimpleVarcharColumn('key_name', 255);
+        $create->addSimpleTextColumn('scopes');
+        $create->addsimpleintColumn('rate_limit', 1000);
+        $create->addDateModifyColumn('created_at');
+        $create->addcolumn(Column::create('revoked_at', ColumnType::datetime, null));
+        $create->addcolumn(Column::create('expires_at', ColumnType::datetime, null));
+        $create->addcolumn(Column::create('last_used_at', ColumnType::datetime, null));
+        $create->addSimpleBoolColumn('is_active', 1);
+        $create->addDateModifyColumn();
+        $create->addDateCreatedColumn();
         $create->execute();
     }
 
@@ -133,40 +67,15 @@ return new class extends AbstractMigration {
         }
 
         $create = new CreateTable('account_api_key_usage');
-
-        $id = new Column();
-        $id->setName('id');
-        $id->setType(ColumnType::int);
-        $id->setAutoIncrement(true);
-        $id->setPrimary(true);
-        $create->addColumn($id);
-
-        $hash = new Column();
-        $hash->setName('key_hash');
-        $hash->setType(ColumnType::varchar, 64);
-        $create->addColumn($hash);
-
-        $userId = new Column();
-        $userId->setName('user_id');
-        $userId->setType(ColumnType::int);
-        $create->addColumn($userId);
-
-        $accessed = new Column();
-        $accessed->setName('accessed_at');
-        $accessed->setType(ColumnType::datetime);
-        $create->addColumn($accessed);
-
-        $ip = new Column();
-        $ip->setName('ip_address');
-        $ip->setType(ColumnType::varchar, 45);
-        $create->addColumn($ip);
-
-        $agent = new Column();
-        $agent->setName('user_agent');
-        $agent->setType(ColumnType::text);
-        $agent->setNull(true);
-        $create->addColumn($agent);
-
+        $create->addIdColumn();
+        $create->addcolumn(Column::create('user_id', ColumnType::bigint, null)->setUnsigned(true));
+        $create->addSimpleVarcharColumn('key_hash', 64, false);
+        $create->addSimpleVarcharColumn('ip_address', 45);
+        $create->addSimpleTextColumn('user_agent', null);
+        $create->addcolumn(Column::create('accessed_at', ColumnType::datetime, null));
+        $create->addSimpleBoolColumn('is_active', 1);
+        $create->addDateModifyColumn();
+        $create->addDateCreatedColumn();
         $create->execute();
     }
 };
