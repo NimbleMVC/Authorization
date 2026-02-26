@@ -28,7 +28,11 @@ return new class extends AbstractMigration {
         $table->addIdColumn();
         $table->addUsernameColumn(true, \NimblePHP\Authorization\Config::$authType);
         $table->addPasswordColumn();
-        $table->addEmailColumn();
+
+        if (\NimblePHP\Authorization\Config::$authType !== 'email') {
+            $table->addEmailColumn();
+        }
+
         $table->addSimpleBoolColumn('active', true);
         $table->addDateModifyColumn();
         $table->addDateCreatedColumn();
@@ -46,6 +50,7 @@ return new class extends AbstractMigration {
         $table->addIdColumn();
         $table->addSimpleVarcharColumn('role');
         $table->addSimpleTextColumn('description');
+        $table->addDateModifyColumn();
         $table->addDateCreatedColumn();
         $table->execute();
     }
@@ -62,6 +67,7 @@ return new class extends AbstractMigration {
         $table->addSimpleVarcharColumn('name');
         $table->addSimpleTextColumn('description');
         $table->addSimpleVarcharColumn('group', default: 'default');
+        $table->addDateModifyColumn();
         $table->addDateCreatedColumn();
         $table->execute();
     }
@@ -77,6 +83,7 @@ return new class extends AbstractMigration {
         $table->addIdColumn();
         $table->addColumn(Column::create('account_id', ColumnType::bigint)->setUnsigned(true)->setNull(false));
         $table->addColumn(Column::create('role_id', ColumnType::bigint)->setUnsigned(true)->setNull(false));
+        $table->addDateModifyColumn();
         $table->addDateCreatedColumn('date_assigned');
         $table->execute();
     }
@@ -92,6 +99,7 @@ return new class extends AbstractMigration {
         $table->addIdColumn();
         $table->addColumn(Column::create('role_id', ColumnType::bigint)->setUnsigned(true)->setNull(false));
         $table->addColumn(Column::create('permission_id', ColumnType::bigint)->setUnsigned(true)->setNull(false));
+        $table->addDateModifyColumn();
         $table->addDateCreatedColumn('date_assigned');
         $table->execute();
     }
