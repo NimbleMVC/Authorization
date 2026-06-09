@@ -11,7 +11,7 @@ use NimblePHP\Authorization\Interfaces\TwoFactorProvider;
 
 /**
  * Config class - Centralized configuration for Authorization library
- * 
+ *
  * This class manages:
  * - Authentication settings (username/email auth type)
  * - User account table configuration
@@ -19,9 +19,9 @@ use NimblePHP\Authorization\Interfaces\TwoFactorProvider;
  * - RBAC (Role-Based Access Control) settings
  * - Session key configuration
  * - Custom password hasher implementation
- * 
+ *
  * Configuration can be customized via environment variables or direct property assignment.
- * 
+ *
  * @package NimblePHP\Authorization
  */
 class Config
@@ -188,6 +188,15 @@ class Config
     public static function getColumn(string $column): string
     {
         return self::$columns[$column] ?? $column;
+    }
+
+    /**
+     * Get session key for authenticated user ID
+     * @return string
+     */
+    public static function getSessionKey(): string
+    {
+        return self::$sessionKey;
     }
 
     /**
@@ -438,7 +447,7 @@ class Config
 
     /**
      * Set custom password hasher implementation
-     * 
+     *
      * @param PasswordHasher $hasher Custom password hasher
      * @return void
      */
@@ -449,9 +458,8 @@ class Config
 
     /**
      * Get password hasher instance
-     * 
      * Returns custom hasher if set, otherwise returns default hasher
-     * 
+     *
      * @return PasswordHasher Password hasher instance
      */
     public static function getPasswordHasher(): PasswordHasher
