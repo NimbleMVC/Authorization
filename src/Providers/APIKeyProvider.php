@@ -77,7 +77,7 @@ class APIKeyProvider implements TokenProvider
         }
 
         $keyHash = hash('sha256', $token);
-        $keyData = $this->keysTable->findByField('key_hash', $keyHash);
+        $keyData = $this->keysTable->find(['key_hash' => $keyHash]);
 
         if (!$keyData) {
             throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.apikey_not_found'));
@@ -96,13 +96,8 @@ class APIKeyProvider implements TokenProvider
             throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.apikey_expired'));
         }
 
-        // Update last used timestamp
-        $this->keysTable->updateByConditions(
-            ['last_used_at' => date('Y-m-d H:i:s')],
-            ['key_hash' => $keyHash]
-        );
+        $this->keysTable->setId($keyRecord['id'])->update(['last_used_at' => date('Y-m-d H:i:s')]);
 
-        // Log usage
         $this->keyUsageTable->insert([
             'key_hash' => $keyHash,
             'user_id' => $keyRecord['user_id'],
@@ -139,11 +134,14 @@ class APIKeyProvider implements TokenProvider
     {
         try {
             $keyHash = hash('sha256', $token);
+            $keyData = $this->keysTable->find(['key_hash' => $keyHash]);
 
-            return $this->keysTable->updateByConditions(
-                ['is_active' => 0],
-                ['key_hash' => $keyHash]
-            );
+            if (!$keyData) {
+                return false;
+            }
+
+            $tableName = 'account_api_keys';
+            return $this->keysTable->setId($keyData[$tableName]['id'])->update(['is_active' => 0]);
         } catch (\Exception $e) {
             return false;
         }
@@ -159,10 +157,11 @@ class APIKeyProvider implements TokenProvider
     {
         try {
             $keyHash = hash('sha256', $token);
-            $keyData = $this->keysTable->findByField('key_hash', $keyHash);
+
+            $keyData = $this->keysTable->find(['key_hash' => $keyHash]);
 
             if (!$keyData) {
-                return true; // Non-existent keys are "revoked"
+                return true;
             }
 
             $tableName = 'account_api_keys';
@@ -190,9 +189,12 @@ class APIKeyProvider implements TokenProvider
             }
 
             $keys = [];
-            foreach ($result['account_api_keys'] ?? [] as $key) {
+
+            foreach ($result as $row) {
+                $key = $row['account_api_keys'] ?? $row;
                 $keys[] = [
                     'id' => $key['id'],
+                    'user_id' => $key['user_id'],
                     'name' => $key['key_name'],
                     'created_at' => $key['created_at'],
                     'last_used_at' => $key['last_used_at'],
@@ -217,7 +219,7 @@ class APIKeyProvider implements TokenProvider
     public function getKey(int $keyId, int $userId): ?array
     {
         try {
-            $result = $this->keysTable->findByConditions([
+            $result = $this->keysTable->find([
                 'id' => $keyId,
                 'user_id' => $userId,
             ]);
@@ -272,10 +274,13 @@ class APIKeyProvider implements TokenProvider
                 return false;
             }
 
-            return $this->keysTable->updateByConditions(
-                $data,
-                ['id' => $keyId, 'user_id' => $userId]
-            );
+            $existing = $this->keysTable->find(['id' => $keyId, 'user_id' => $userId]);
+
+            if (!$existing) {
+                return false;
+            }
+
+            return $this->keysTable->setId($keyId)->update($data);
         } catch (\Exception $e) {
             return false;
         }
@@ -301,7 +306,7 @@ class APIKeyProvider implements TokenProvider
                 'accessed_at >' => $oneHourAgo,
             ]);
 
-            $count = count($result['account_api_key_usage'] ?? []);
+            $count = count($result);
 
             return [
                 'limit' => $limit,
