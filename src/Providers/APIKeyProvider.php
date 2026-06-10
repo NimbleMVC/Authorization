@@ -245,6 +245,28 @@ class APIKeyProvider implements TokenProvider
     }
 
     /**
+     * Revoke API key by ID
+     *
+     * @param int $keyId Key ID
+     * @param int $userId User ID (for verification)
+     * @return bool
+     */
+    public function revokeById(int $keyId, int $userId): bool
+    {
+        try {
+            $existing = $this->keysTable->find(['id' => $keyId, 'user_id' => $userId]);
+
+            if (!$existing) {
+                return false;
+            }
+
+            return $this->keysTable->setId($keyId)->update(['is_active' => 0]);
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
      * Update API key metadata
      *
      * @param int $keyId Key ID
