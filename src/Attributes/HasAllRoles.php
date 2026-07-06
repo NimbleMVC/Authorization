@@ -4,6 +4,8 @@ namespace NimblePHP\Authorization\Attributes;
 
 use Attribute;
 use NimblePHP\Authorization\Authorization;
+use NimblePHP\Authorization\Events\AccessDeniedEvent;
+use NimblePHP\Framework\Kernel;
 use NimblePHP\Authorization\Exceptions\UnauthorizedException;
 use NimblePHP\Framework\Translation\Translation;
 
@@ -50,6 +52,7 @@ class HasAllRoles
         $authorization = new Authorization();
 
         if (!$authorization->hasAllRoles($this->roles)) {
+            Kernel::dispatchEvent(new AccessDeniedEvent($authorization->getAuthorizedId(), implode(', ', $this->roles), AccessDeniedEvent::TYPE_ALL_ROLES));
             throw new UnauthorizedException(Translation::getInstance()->translate('module.authorization.errors.user_missing_all_roles', ['roles' => implode(', ', $this->roles)]));
         }
     }

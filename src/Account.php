@@ -5,6 +5,13 @@ namespace NimblePHP\Authorization;
 use krzysztofzylka\DatabaseManager\Exception\DatabaseManagerException;
 use krzysztofzylka\DatabaseManager\Table;
 use Krzysztofzylka\Hash\VersionedHasher;
+use NimblePHP\Authorization\Events\AccountActivatedEvent;
+use NimblePHP\Authorization\Events\AccountDeactivatedEvent;
+use NimblePHP\Authorization\Events\BeforePasswordChangeEvent;
+use NimblePHP\Authorization\Events\PasswordChangedEvent;
+use NimblePHP\Authorization\Events\RoleRemovedEvent;
+use NimblePHP\Authorization\Exceptions\ValidationException;
+use NimblePHP\Authorization\Services\RememberMeService;
 use NimblePHP\Framework\Kernel;
 
 /**
@@ -181,12 +188,32 @@ class Account
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function changePassword(string $password): bool
+    public function changePassword(string $password, bool $dispatchEvents = true): bool
     {
+        if ($dispatchEvents && !empty($this->id)) {
+            // Allow listeners to veto (password policy, HIBP)
+            /** @var BeforePasswordChangeEvent $beforeEvent */
+            $beforeEvent = Kernel::dispatchEvent(new BeforePasswordChangeEvent((int)$this->id, $password));
+
+            if ($beforeEvent->isRejected()) {
+                throw new ValidationException($beforeEvent->getRejectReason());
+            }
+        }
+
         $passwordHasher = Config::getPasswordHasher();
         $hashedPassword = $passwordHasher->hash($password);
+        $result = $this->update([Config::getColumn('password') => $hashedPassword]);
 
-        return $this->update([Config::getColumn('password') => $hashedPassword]);
+        // Stolen remember-me tokens must not survive a password change
+        if ($result && Config::$rememberMeEnabled && !empty($this->id)) {
+            (new RememberMeService())->invalidateAll((int)$this->id);
+        }
+
+        if ($result && $dispatchEvents && !empty($this->id)) {
+            Kernel::dispatchEvent(new PasswordChangedEvent((int)$this->id));
+        }
+
+        return $result;
     }
 
     /**
@@ -238,6 +265,10 @@ class Account
             $this->setId($originalId);
         }
 
+        if ($result) {
+            Kernel::dispatchEvent(new AccountActivatedEvent((int)$id));
+        }
+
         return $result;
     }
 
@@ -261,6 +292,10 @@ class Account
 
         if ($originalId) {
             $this->setId($originalId);
+        }
+
+        if ($result) {
+            Kernel::dispatchEvent(new AccountDeactivatedEvent((int)$id));
         }
 
         return $result;
@@ -461,8 +496,7 @@ class Account
             return false;
         }
 
-        $userRolesTable = new Table(Config::getUserRoleTableName());
-        $userRolesTable->deleteByConditions([Config::getUserRoleColumn('user_id') => $userId]);
+        $this->clearRoles($userId);
 
         foreach ($roleNames as $roleName) {
             $this->assignRole($roleName, $userId);
@@ -485,9 +519,21 @@ class Account
             return false;
         }
 
+        $currentRoles = $this->getRoles($userId);
         $userRolesTable = new Table(Config::getUserRoleTableName());
+        $result = $userRolesTable->deleteByConditions([Config::getUserRoleColumn('user_id') => $userId]);
 
-        return $userRolesTable->deleteByConditions([Config::getUserRoleColumn('user_id') => $userId]);
+        if ($result) {
+            foreach ($currentRoles as $roleData) {
+                $roleName = $roleData[Config::getRoleTableName()][Config::getRoleColumn('name')] ?? null;
+
+                if ($roleName !== null) {
+                    Kernel::dispatchEvent(new RoleRemovedEvent((int)$userId, (string)$roleName));
+                }
+            }
+        }
+
+        return $result;
     }
 
     /**

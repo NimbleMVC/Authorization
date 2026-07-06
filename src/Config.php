@@ -3,11 +3,18 @@
 namespace NimblePHP\Authorization;
 
 use InvalidArgumentException;
+use NimblePHP\Authorization\Handlers\ExceptionUnauthorizedHandler;
 use NimblePHP\Authorization\Interfaces\OAuthProvider;
 use NimblePHP\Authorization\Interfaces\PasswordHasher;
 use NimblePHP\Authorization\Hashers\DefaultPasswordHasher;
+use NimblePHP\Authorization\Interfaces\PermissionProvider;
+use NimblePHP\Authorization\Interfaces\RateLimiterStorage;
 use NimblePHP\Authorization\Interfaces\TokenProvider;
 use NimblePHP\Authorization\Interfaces\TwoFactorProvider;
+use NimblePHP\Authorization\Interfaces\UnauthorizedHandler;
+use NimblePHP\Authorization\Providers\RbacPermissionProvider;
+use NimblePHP\Authorization\Storages\DatabaseRateLimiterStorage;
+use NimblePHP\Authorization\Storages\SessionRateLimiterStorage;
 
 /**
  * Config class - Centralized configuration for Authorization library
@@ -28,7 +35,7 @@ class Config
 {
 
     /**
-     * Middleware priority
+     * Priority of the AfterAttributesControllerEvent listener (access control)
      * @var int
      */
     public static int $middlewarePriority = 255;
@@ -63,6 +70,73 @@ class Config
      */
     public static bool $requireAuthByDefault = false;
 
+    /**
+     * Manage database schema (run module migrations)
+     *
+     * Set to false when the application ships its own accounts/RBAC schema
+     * ("bring your own schema") - the module then only reads/writes tables
+     * configured via table/column settings.
+     * @var bool
+     */
+    public static bool $manageSchema = true;
+
+    /**
+     * Regenerate session id when the authenticated account changes (session fixation protection)
+     * @var bool
+     */
+    public static bool $regenerateSessionOnLogin = true;
+
+    // ===== Unauthorized Request Handling =====
+
+    /**
+     * Login page URL used by WebUnauthorizedHandler
+     * @var string
+     */
+    public static string $loginUrl = '/login';
+
+    /**
+     * Session key for the URL to return to after login
+     * @var string
+     */
+    public static string $returnUrlSessionKey = 'return_url';
+
+    /**
+     * URI prefixes treated as API requests (JSON 401 instead of redirect)
+     * @var string[]
+     */
+    public static array $apiPaths = [];
+
+    /**
+     * Treat AJAX requests (X-Requested-With: XMLHttpRequest) as API requests
+     * @var bool
+     */
+    public static bool $treatAjaxAsApi = true;
+
+    /**
+     * Custom API request detector: fn(Request $request): ?bool
+     * (null = undecided, continue with the built-in signal cascade)
+     * @var callable|null
+     */
+    public static $apiRequestDetector = null;
+
+    /**
+     * Custom JSON payload factory for 401 responses: fn(Request $request): array
+     * @var callable|null
+     */
+    public static $unauthorizedJsonPayload = null;
+
+    /**
+     * Handler invoked when an unauthenticated request hits a protected action
+     * @var UnauthorizedHandler|null
+     */
+    private static ?UnauthorizedHandler $unauthorizedHandler = null;
+
+    /**
+     * Source of truth for role/permission checks (attributes, Authorization::hasRole/hasPermission)
+     * @var PermissionProvider|null
+     */
+    private static ?PermissionProvider $permissionProvider = null;
+
     // ===== Password Hashing Configuration =====
 
     /**
@@ -91,7 +165,63 @@ class Config
      */
     public static int $rateLimitLockoutDuration = 900; // 15 minutes
 
+    /**
+     * Also track failed attempts per client IP (REMOTE_ADDR)
+     * @var bool
+     */
+    public static bool $rateLimitTrackIp = false;
+
+    /**
+     * Table name for DatabaseRateLimiterStorage
+     * @var string
+     */
+    public static string $rateLimitTableName = 'account_rate_limits';
+
+    /**
+     * Rate limiter storage backend
+     * @var RateLimiterStorage|null
+     */
+    private static ?RateLimiterStorage $rateLimiterStorage = null;
+
+    // ===== Remember-Me Configuration =====
+
+    /**
+     * Enable persistent "remember me" login tokens
+     * @var bool
+     */
+    public static bool $rememberMeEnabled = false;
+
+    /**
+     * Remember-me cookie name
+     * @var string
+     */
+    public static string $rememberMeCookieName = 'remember_token';
+
+    /**
+     * Remember-me token lifetime in seconds
+     * @var int
+     */
+    public static int $rememberMeLifetime = 2592000; // 30 days
+
+    /**
+     * Table name for remember-me tokens
+     * @var string
+     */
+    public static string $rememberMeTableName = 'account_remember_tokens';
+
     // ===== Two-Factor Authentication Configuration =====
+
+    /**
+     * Session key for pending challenge account ID (requireChallenge mechanism)
+     * @var string
+     */
+    public static string $challengeSessionKey = 'pending_challenge_account_id';
+
+    /**
+     * Session key for pending challenge name
+     * @var string
+     */
+    public static string $challengeNameSessionKey = 'pending_challenge_name';
 
     /**
      * Session key for pending 2FA user ID
@@ -176,8 +306,116 @@ class Config
         self::$columns['password'] = $_ENV['AUTHORIZATION_COLUMN_PASSWORD'] ?? 'password';
         self::$columns['active'] = $_ENV['AUTHORIZATION_COLUMN_ACTIVE'] ?? 'active';
         self::$middlewarePriority = $_ENV['AUTHORIZATION_MIDDLEWARE_PRIORITY'] ?? 255;
+        self::$manageSchema = filter_var($_ENV['AUTHORIZATION_MANAGE_SCHEMA'] ?? true, FILTER_VALIDATE_BOOLEAN);
+        self::$regenerateSessionOnLogin = filter_var($_ENV['AUTHORIZATION_SESSION_REGENERATE'] ?? true, FILTER_VALIDATE_BOOLEAN);
+        self::$loginUrl = $_ENV['AUTHORIZATION_LOGIN_URL'] ?? '/login';
+        self::$returnUrlSessionKey = $_ENV['AUTHORIZATION_RETURN_URL_SESSION_KEY'] ?? 'return_url';
+        self::$apiPaths = array_values(array_filter(array_map('trim', explode(',', $_ENV['AUTHORIZATION_API_PATHS'] ?? ''))));
+        self::$treatAjaxAsApi = filter_var($_ENV['AUTHORIZATION_TREAT_AJAX_AS_API'] ?? true, FILTER_VALIDATE_BOOLEAN);
+        self::$rateLimitTrackIp = filter_var($_ENV['AUTHORIZATION_RATE_LIMIT_TRACK_IP'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        self::$rateLimitTableName = $_ENV['AUTHORIZATION_RATE_LIMIT_TABLE'] ?? 'account_rate_limits';
+
+        if (($_ENV['AUTHORIZATION_RATE_LIMIT_STORAGE'] ?? 'database') === 'session') {
+            self::$rateLimiterStorage = new SessionRateLimiterStorage();
+        }
+
+        self::$rememberMeEnabled = filter_var($_ENV['AUTHORIZATION_REMEMBER_ME_ENABLED'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        self::$rememberMeCookieName = $_ENV['AUTHORIZATION_REMEMBER_ME_COOKIE'] ?? 'remember_token';
+        self::$rememberMeLifetime = (int)($_ENV['AUTHORIZATION_REMEMBER_ME_LIFETIME'] ?? 2592000);
+        self::$rememberMeTableName = $_ENV['AUTHORIZATION_REMEMBER_ME_TABLE'] ?? 'account_remember_tokens';
 
         self::initRbac();
+    }
+
+    /**
+     * Set permission provider (delegate role/permission checks to the application)
+     * @param PermissionProvider $provider
+     * @return void
+     */
+    public static function setPermissionProvider(PermissionProvider $provider): void
+    {
+        self::$permissionProvider = $provider;
+    }
+
+    /**
+     * Get permission provider (default: RbacPermissionProvider on module RBAC tables)
+     * @return PermissionProvider
+     */
+    public static function getPermissionProvider(): PermissionProvider
+    {
+        if (self::$permissionProvider === null) {
+            self::$permissionProvider = new RbacPermissionProvider();
+        }
+
+        return self::$permissionProvider;
+    }
+
+    /**
+     * Set rate limiter storage backend
+     * @param RateLimiterStorage $storage
+     * @return void
+     */
+    public static function setRateLimiterStorage(RateLimiterStorage $storage): void
+    {
+        self::$rateLimiterStorage = $storage;
+    }
+
+    /**
+     * Get rate limiter storage backend
+     *
+     * Default: DatabaseRateLimiterStorage (falls back to session storage with
+     * a warning when the table is missing). Set AUTHORIZATION_RATE_LIMIT_STORAGE=session
+     * to force the session backend.
+     * @return RateLimiterStorage
+     */
+    public static function getRateLimiterStorage(): RateLimiterStorage
+    {
+        if (self::$rateLimiterStorage === null) {
+            self::$rateLimiterStorage = new DatabaseRateLimiterStorage();
+        }
+
+        return self::$rateLimiterStorage;
+    }
+
+    /**
+     * Get users table name
+     * @return string
+     */
+    public static function getTableName(): string
+    {
+        return self::$tableName;
+    }
+
+    /**
+     * Check if the module manages the database schema (migrations)
+     * @return bool
+     */
+    public static function isSchemaManaged(): bool
+    {
+        return self::$manageSchema;
+    }
+
+    /**
+     * Set handler for unauthenticated requests to protected actions
+     * @param UnauthorizedHandler $handler
+     * @return void
+     */
+    public static function setUnauthorizedHandler(UnauthorizedHandler $handler): void
+    {
+        self::$unauthorizedHandler = $handler;
+    }
+
+    /**
+     * Get handler for unauthenticated requests (default: ExceptionUnauthorizedHandler)
+     * @return UnauthorizedHandler
+     */
+    public static function getUnauthorizedHandler(): UnauthorizedHandler
+    {
+        if (self::$unauthorizedHandler === null) {
+            self::$unauthorizedHandler = new ExceptionUnauthorizedHandler();
+        }
+
+        return self::$unauthorizedHandler;
     }
 
     /**
@@ -267,7 +505,7 @@ class Config
      */
     public static array $roleColumns = [
         'id' => 'id',
-        'name' => 'name',
+        'name' => 'role',
         'description' => 'description',
         'created_at' => 'date_created'
     ];
@@ -316,30 +554,30 @@ class Config
         self::$userRolesTableName = $_ENV['AUTHORIZATION_USER_ROLES_TABLE'] ?? 'account_user_roles';
         self::$rolePermissionsTableName = $_ENV['AUTHORIZATION_ROLE_PERMISSIONS_TABLE'] ?? 'account_role_permissions';
 
-        // Role columns
+        // Role columns (defaults match the module migration schema)
         self::$roleColumns['id'] = $_ENV['AUTHORIZATION_ROLE_COLUMN_ID'] ?? 'id';
-        self::$roleColumns['name'] = $_ENV['AUTHORIZATION_ROLE_COLUMN_NAME'] ?? 'name';
+        self::$roleColumns['name'] = $_ENV['AUTHORIZATION_ROLE_COLUMN_NAME'] ?? 'role';
         self::$roleColumns['description'] = $_ENV['AUTHORIZATION_ROLE_COLUMN_DESCRIPTION'] ?? 'description';
-        self::$roleColumns['created_at'] = $_ENV['AUTHORIZATION_ROLE_COLUMN_CREATED_AT'] ?? 'created_at';
+        self::$roleColumns['created_at'] = $_ENV['AUTHORIZATION_ROLE_COLUMN_CREATED_AT'] ?? 'date_created';
 
         // Permission columns
         self::$permissionColumns['id'] = $_ENV['AUTHORIZATION_PERMISSION_COLUMN_ID'] ?? 'id';
         self::$permissionColumns['name'] = $_ENV['AUTHORIZATION_PERMISSION_COLUMN_NAME'] ?? 'name';
         self::$permissionColumns['description'] = $_ENV['AUTHORIZATION_PERMISSION_COLUMN_DESCRIPTION'] ?? 'description';
         self::$permissionColumns['group'] = $_ENV['AUTHORIZATION_PERMISSION_COLUMN_GROUP'] ?? 'group';
-        self::$permissionColumns['created_at'] = $_ENV['AUTHORIZATION_PERMISSION_COLUMN_CREATED_AT'] ?? 'created_at';
+        self::$permissionColumns['created_at'] = $_ENV['AUTHORIZATION_PERMISSION_COLUMN_CREATED_AT'] ?? 'date_created';
 
         // User role columns
         self::$userRoleColumns['id'] = $_ENV['AUTHORIZATION_USER_ROLE_COLUMN_ID'] ?? 'id';
-        self::$userRoleColumns['user_id'] = $_ENV['AUTHORIZATION_USER_ROLE_COLUMN_USER_ID'] ?? 'user_id';
+        self::$userRoleColumns['user_id'] = $_ENV['AUTHORIZATION_USER_ROLE_COLUMN_USER_ID'] ?? 'account_id';
         self::$userRoleColumns['role_id'] = $_ENV['AUTHORIZATION_USER_ROLE_COLUMN_ROLE_ID'] ?? 'role_id';
-        self::$userRoleColumns['assigned_at'] = $_ENV['AUTHORIZATION_USER_ROLE_COLUMN_ASSIGNED_AT'] ?? 'assigned_at';
+        self::$userRoleColumns['assigned_at'] = $_ENV['AUTHORIZATION_USER_ROLE_COLUMN_ASSIGNED_AT'] ?? 'date_assigned';
 
         // Role permission columns
         self::$rolePermissionColumns['id'] = $_ENV['AUTHORIZATION_ROLE_PERMISSION_COLUMN_ID'] ?? 'id';
         self::$rolePermissionColumns['role_id'] = $_ENV['AUTHORIZATION_ROLE_PERMISSION_COLUMN_ROLE_ID'] ?? 'role_id';
         self::$rolePermissionColumns['permission_id'] = $_ENV['AUTHORIZATION_ROLE_PERMISSION_COLUMN_PERMISSION_ID'] ?? 'permission_id';
-        self::$rolePermissionColumns['assigned_at'] = $_ENV['AUTHORIZATION_ROLE_PERMISSION_COLUMN_ASSIGNED_AT'] ?? 'assigned_at';
+        self::$rolePermissionColumns['assigned_at'] = $_ENV['AUTHORIZATION_ROLE_PERMISSION_COLUMN_ASSIGNED_AT'] ?? 'date_assigned';
     }
 
     /**
