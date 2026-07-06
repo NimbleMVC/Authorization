@@ -2,7 +2,9 @@
 
 namespace NimblePHP\Authorization;
 
-use NimblePHP\Authorization\Middlewares\AuthorizationMiddleware;
+use NimblePHP\Authorization\Events\AuthorizationConfiguredEvent;
+use NimblePHP\Authorization\Listeners\AuthorizationEventListener;
+use NimblePHP\Framework\Event\Framework\AfterAttributesControllerEvent;
 use NimblePHP\Framework\Kernel;
 use NimblePHP\Framework\Module\Interfaces\ModuleInterface;
 use NimblePHP\Framework\Module\Interfaces\ModuleUpdateInterface;
@@ -28,7 +30,11 @@ class Module implements ModuleInterface, ModuleUpdateInterface, TranslationProvi
     {
         Config::init();
 
-        Kernel::$middlewareManager->add(new AuthorizationMiddleware(), Config::$middlewarePriority);
+        $listener = new AuthorizationEventListener();
+        Kernel::getEventDispatcher()->addListener(AfterAttributesControllerEvent::class, [$listener, 'onAfterAttributesController'], Config::$middlewarePriority);
+
+        // Extension modules (2fa, social-login, ...) hook here - no dependency on module load order
+        Kernel::dispatchEvent(new AuthorizationConfiguredEvent());
     }
 
     /**
@@ -44,6 +50,11 @@ class Module implements ModuleInterface, ModuleUpdateInterface, TranslationProvi
     public function onUpdate(): void
     {
         Config::init();
+
+        if (!Config::isSchemaManaged()) {
+            return;
+        }
+
         $migration = new Migrations(Kernel::$projectPath, __DIR__ . '/Migrations', 'module_authorization');
         $migration->runMigrations();
     }

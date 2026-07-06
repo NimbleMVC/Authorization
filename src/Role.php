@@ -5,6 +5,10 @@ namespace NimblePHP\Authorization;
 use InvalidArgumentException;
 use krzysztofzylka\DatabaseManager\Exception\DatabaseManagerException;
 use krzysztofzylka\DatabaseManager\Table;
+use NimblePHP\Authorization\Events\RoleAssignedEvent;
+use NimblePHP\Authorization\Events\RolePermissionChangedEvent;
+use NimblePHP\Authorization\Events\RoleRemovedEvent;
+use NimblePHP\Framework\Kernel;
 use NimblePHP\Framework\Translation\Translation;
 
 /**
@@ -218,11 +222,17 @@ class Role
             return true;
         }
 
-        return $this->userRolesTable->insert([
+        $result = $this->userRolesTable->insert([
             Config::getUserRoleColumn('user_id') => $userId,
             Config::getUserRoleColumn('role_id') => $this->id,
             Config::getUserRoleColumn('assigned_at') => date('Y-m-d H:i:s')
         ]);
+
+        if ($result) {
+            Kernel::dispatchEvent(new RoleAssignedEvent($userId, (string)$this->getRoleName()));
+        }
+
+        return $result;
     }
 
     /**
@@ -237,10 +247,17 @@ class Role
             return false;
         }
 
-        return $this->userRolesTable->deleteByConditions([
+        $hadRole = $this->userHasRole($userId);
+        $result = $this->userRolesTable->deleteByConditions([
             Config::getUserRoleColumn('user_id') => $userId,
             Config::getUserRoleColumn('role_id') => $this->id
         ]);
+
+        if ($result && $hadRole) {
+            Kernel::dispatchEvent(new RoleRemovedEvent($userId, (string)$this->getRoleName()));
+        }
+
+        return $result;
     }
 
     /**
@@ -323,11 +340,17 @@ class Role
             return true;
         }
 
-        return $this->rolePermissionsTable->insert([
+        $result = $this->rolePermissionsTable->insert([
             Config::getRolePermissionColumn('role_id') => $this->id,
             Config::getRolePermissionColumn('permission_id') => $permissionId,
             Config::getRolePermissionColumn('assigned_at') => date('Y-m-d H:i:s')
         ]);
+
+        if ($result) {
+            Kernel::dispatchEvent(new RolePermissionChangedEvent((int)$this->id, $this->getRoleName()));
+        }
+
+        return $result;
     }
 
     /**
@@ -342,10 +365,16 @@ class Role
             return false;
         }
 
-        return $this->rolePermissionsTable->deleteByConditions([
+        $result = $this->rolePermissionsTable->deleteByConditions([
             Config::getRolePermissionColumn('role_id') => $this->id,
             Config::getRolePermissionColumn('permission_id') => $permissionId
         ]);
+
+        if ($result) {
+            Kernel::dispatchEvent(new RolePermissionChangedEvent((int)$this->id, $this->getRoleName()));
+        }
+
+        return $result;
     }
 
     /**
@@ -392,12 +421,24 @@ class Role
         }
 
         $this->rolePermissionsTable->deleteByConditions([Config::getRolePermissionColumn('role_id') => $this->id]);
+        Kernel::dispatchEvent(new RolePermissionChangedEvent((int)$this->id, $this->getRoleName()));
 
         foreach ($permissionIds as $permissionId) {
             $this->addPermission($permissionId);
         }
 
         return true;
+    }
+
+    /**
+     * Get the role name for event payloads
+     * @return string|null
+     */
+    private function getRoleName(): ?string
+    {
+        $role = $this->getRole();
+
+        return $role[Config::getRoleTableName()][Config::getRoleColumn('name')] ?? null;
     }
 
     /**

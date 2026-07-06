@@ -4,6 +4,8 @@ namespace NimblePHP\Authorization\Attributes;
 
 use Attribute;
 use NimblePHP\Authorization\Authorization;
+use NimblePHP\Authorization\Events\AccessDeniedEvent;
+use NimblePHP\Framework\Kernel;
 use NimblePHP\Authorization\Exceptions\UnauthorizedException;
 use NimblePHP\Framework\Translation\Translation;
 
@@ -50,6 +52,7 @@ class HasAnyPermission
         $authorization = new Authorization();
 
         if (!$authorization->hasAnyPermission($this->permissions)) {
+            Kernel::dispatchEvent(new AccessDeniedEvent($authorization->getAuthorizedId(), implode(', ', $this->permissions), AccessDeniedEvent::TYPE_ANY_PERMISSION));
             throw new UnauthorizedException(Translation::getInstance()->translate('module.authorization.errors.user_missing_any_permission', ['permissions' => implode(', ', $this->permissions)]));
         }
     }

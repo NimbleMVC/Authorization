@@ -9,12 +9,12 @@
         "email_exists": "Email już istnieje",
         "password_empty": "Hasło nie może być puste",
         "password_too_short": "Hasło musi mieć co najmniej 6 znaków",
-        "login_empty": "{field} nie może być puste",
+        "login_empty": ":field nie może być puste",
         "credentials_empty": "Nazwa użytkownika i hasło nie mogą być puste",
         "invalid_credentials": "Nieprawidłowa nazwa użytkownika lub hasło",
         "account_not_activated": "Konto nie zostało aktywowane",
         "authorization_header_missing": "Brak nagłówka autoryzacji",
-        "rate_limit_exceeded": "Zbyt wiele prób logowania. Spróbuj ponownie za {seconds} sekund",
+        "rate_limit_exceeded": "Zbyt wiele prób logowania. Spróbuj ponownie za :seconds sekund",
         "two_factor_required": "Wymagana autoryzacja dwuskładnikowa",
         "invalid_2fa_code": "Nieprawidłowy lub wygasły kod 2FA"
       },
@@ -23,7 +23,7 @@
         "user_must_be_authenticated_2fa_disable": "Użytkownik musi być zalogowany, aby wyłączyć 2FA",
         "no_pending_2fa": "Brak oczekującej weryfikacji 2FA",
         "user_id_mismatch": "Niezgodność ID użytkownika",
-        "2fa_provider_not_configured": "Dostawca 2FA nie jest skonfigurowany: {provider}",
+        "2fa_provider_not_configured": "Dostawca 2FA nie jest skonfigurowany: :provider",
         "user_not_found": "Nie znaleziono użytkownika",
         "2fa_not_enabled": "2FA nie jest włączone dla użytkownika"
       },
@@ -51,11 +51,11 @@
         "role_already_exists": "Rola już istnieje",
         "bcrypt_invalid_cost": "Koszt musi być między 4 a 31",
         "identifier_empty": "Identyfikator nie może być pusty",
-        "user_missing_role": "Użytkownik nie ma wymaganej roli: {role}",
-        "user_missing_all_roles": "Użytkownik nie ma wszystkich wymaganych ról: {roles}",
-        "user_missing_permission": "Użytkownik nie ma wymaganego uprawnienia: {permission}",
-        "user_missing_any_permission": "Użytkownik nie ma żadnego z wymaganych uprawnień: {permissions}",
-        "user_missing_any_role": "Użytkownik nie ma żadnej z wymaganych ról: {roles}"
+        "user_missing_role": "Użytkownik nie ma wymaganej roli: :role",
+        "user_missing_all_roles": "Użytkownik nie ma wszystkich wymaganych ról: :roles",
+        "user_missing_permission": "Użytkownik nie ma wymaganego uprawnienia: :permission",
+        "user_missing_any_permission": "Użytkownik nie ma żadnego z wymaganych uprawnień: :permissions",
+        "user_missing_any_role": "Użytkownik nie ma żadnej z wymaganych ról: :roles"
       }
     }
   }

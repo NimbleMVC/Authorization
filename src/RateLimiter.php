@@ -3,115 +3,118 @@
 namespace NimblePHP\Authorization;
 
 use InvalidArgumentException;
+use NimblePHP\Authorization\Events\RateLimitLockedEvent;
+use NimblePHP\Authorization\Interfaces\RateLimiterStorage;
 use NimblePHP\Framework\Kernel;
-use NimblePHP\Framework\Session;
 use NimblePHP\Framework\Translation\Translation;
 
 /**
  * RateLimiter class - Protects against brute force attacks using rate limiting
- * 
+ *
  * This class provides:
- * - Login attempt tracking per user/IP
+ * - Login attempt tracking per identifier (username/email) and optionally per client IP
  * - Configurable attempt limits and lockout duration
- * - Session-based and time-based blocking
+ * - Pluggable storage (session by default, database for persistent protection)
  * - Automatic reset after lockout period expires
- * 
+ *
  * @package NimblePHP\Authorization
  */
 class RateLimiter
 {
-    /**
-     * Session instance
-     * @var Session
-     */
-    private Session $session;
 
     /**
-     * Session key prefix for rate limiting
-     * @var string
+     * Storage backend
+     * @var RateLimiterStorage
      */
-    private string $sessionKeyPrefix = 'rate_limit_';
+    private RateLimiterStorage $storage;
 
     /**
      * Construct RateLimiter instance
      */
     public function __construct()
     {
-        $this->session = Kernel::$serviceContainer->get('kernel.session');
+        $this->storage = Config::getRateLimiterStorage();
     }
 
     /**
-     * Check if login is rate limited for given identifier
-     * 
+     * Check if login is rate limited for given identifier (or its client IP)
+     *
      * @param string $identifier Username or email
      * @return bool True if rate limited (blocked), false if allowed
      */
     public function isRateLimited(string $identifier): bool
     {
-        $key = $this->getSessionKey($identifier);
-        
-        if (!$this->session->exists($key)) {
-            return false;
+        foreach ($this->getKeys($identifier) as $key) {
+            if ($this->isKeyLimited($key)) {
+                return true;
+            }
         }
 
-        $data = $this->session->get($key);
-        $now = time();
-
-        // Check if lockout period has expired
-        if (isset($data['locked_until']) && $data['locked_until'] < $now) {
-            $this->session->remove($key);
-            return false;
-        }
-
-        // Check if currently locked
-        return isset($data['locked_until']) && $data['locked_until'] >= $now;
+        return false;
     }
 
     /**
-     * Record a failed login attempt
-     * 
+     * Record a failed login attempt (for the identifier and, if enabled, the client IP)
+     *
      * @param string $identifier Username or email
      * @return void
      */
     public function recordFailedAttempt(string $identifier): void
     {
-        $key = $this->getSessionKey($identifier);
         $maxAttempts = Config::getRateLimitMaxAttempts();
         $lockoutDuration = Config::getRateLimitLockoutDuration();
         $now = time();
 
-        $data = $this->session->exists($key) ? $this->session->get($key) : [
-            'attempts' => 0,
-            'first_attempt' => $now,
-            'locked_until' => null
-        ];
+        foreach ($this->getKeys($identifier) as $key) {
+            $data = $this->storage->get($key) ?? [
+                'attempts' => 0,
+                'first_attempt' => $now,
+                'locked_until' => null
+            ];
 
-        $data['attempts']++;
-        $data['last_attempt'] = $now;
+            // Forget stale counters (observation window = lockout duration)
+            if (empty($data['locked_until']) && isset($data['last_attempt']) && ($now - (int)$data['last_attempt']) > $lockoutDuration) {
+                $data = [
+                    'attempts' => 0,
+                    'first_attempt' => $now,
+                    'locked_until' => null
+                ];
+            }
 
-        // Check if max attempts exceeded
-        if ($data['attempts'] >= $maxAttempts) {
-            $data['locked_until'] = $now + $lockoutDuration;
+            $data['attempts']++;
+            $data['last_attempt'] = $now;
+
+            // Check if max attempts exceeded
+            $wasLocked = !empty($data['locked_until']);
+
+            if ($data['attempts'] >= $maxAttempts) {
+                $data['locked_until'] = $now + $lockoutDuration;
+            }
+
+            $this->storage->set($key, $data);
+
+            if (!$wasLocked && !empty($data['locked_until'])) {
+                Kernel::dispatchEvent(new RateLimitLockedEvent($key, (int)$data['locked_until']));
+            }
         }
-
-        $this->session->set($key, $data);
     }
 
     /**
      * Clear rate limit for identifier (successful login)
-     * 
+     *
      * @param string $identifier Username or email
      * @return void
      */
     public function clearAttempts(string $identifier): void
     {
-        $key = $this->getSessionKey($identifier);
-        $this->session->remove($key);
+        foreach ($this->getKeys($identifier) as $key) {
+            $this->storage->remove($key);
+        }
     }
 
     /**
      * Get remaining attempts before lockout
-     * 
+     *
      * @param string $identifier Username or email
      * @return int Number of attempts remaining (0 if locked)
      */
@@ -121,66 +124,98 @@ class RateLimiter
             return 0;
         }
 
-        $key = $this->getSessionKey($identifier);
-        
-        if (!$this->session->exists($key)) {
-            return Config::getRateLimitMaxAttempts();
-        }
+        $remaining = Config::getRateLimitMaxAttempts();
 
-        $data = $this->session->get($key);
-        $remaining = Config::getRateLimitMaxAttempts() - $data['attempts'];
+        foreach ($this->getKeys($identifier) as $key) {
+            $data = $this->storage->get($key);
+
+            if ($data === null) {
+                continue;
+            }
+
+            $remaining = min($remaining, Config::getRateLimitMaxAttempts() - (int)$data['attempts']);
+        }
 
         return max(0, $remaining);
     }
 
     /**
      * Get time remaining in lockout (in seconds)
-     * 
+     *
      * @param string $identifier Username or email
      * @return int Seconds remaining in lockout (0 if not locked)
      */
     public function getLockoutTimeRemaining(string $identifier): int
     {
-        if (!$this->isRateLimited($identifier)) {
-            return 0;
-        }
+        $remaining = 0;
 
-        $key = $this->getSessionKey($identifier);
-        $data = $this->session->get($key);
-        $remaining = $data['locked_until'] - time();
+        foreach ($this->getKeys($identifier) as $key) {
+            $data = $this->storage->get($key);
+
+            if ($data === null || empty($data['locked_until'])) {
+                continue;
+            }
+
+            $remaining = max($remaining, (int)$data['locked_until'] - time());
+        }
 
         return max(0, $remaining);
     }
 
     /**
-     * Get session key for rate limit tracking
-     * 
-     * @param string $identifier Username or email
-     * @return string Session key
+     * Check single tracking key, cleaning up expired lockouts
+     *
+     * @param string $key
+     * @return bool
      */
-    private function getSessionKey(string $identifier): string
+    private function isKeyLimited(string $key): bool
+    {
+        $data = $this->storage->get($key);
+
+        if ($data === null) {
+            return false;
+        }
+
+        $now = time();
+
+        // Check if lockout period has expired
+        if (isset($data['locked_until']) && $data['locked_until'] < $now) {
+            $this->storage->remove($key);
+            return false;
+        }
+
+        // Check if currently locked
+        return isset($data['locked_until']) && $data['locked_until'] >= $now;
+    }
+
+    /**
+     * Get tracking keys for identifier (identifier itself + optional client IP)
+     *
+     * @param string $identifier Username or email
+     * @return string[]
+     */
+    private function getKeys(string $identifier): array
     {
         if (empty(trim($identifier))) {
             throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.identifier_empty'));
         }
 
-        return $this->sessionKeyPrefix . md5($identifier);
+        $keys = [$identifier];
+
+        if (Config::$rateLimitTrackIp && !empty($_SERVER['REMOTE_ADDR'])) {
+            $keys[] = 'ip:' . $_SERVER['REMOTE_ADDR'];
+        }
+
+        return $keys;
     }
 
     /**
      * Reset all rate limits (admin function)
-     * 
+     *
      * @return void
      */
     public function resetAll(): void
     {
-        $session = Kernel::$serviceContainer->get('kernel.session');
-        $sessionData = $session->getAll();
-
-        foreach (array_keys($sessionData) as $key) {
-            if (strpos($key, $this->sessionKeyPrefix) === 0) {
-                $session->remove($key);
-            }
-        }
+        $this->storage->removeAll();
     }
 }

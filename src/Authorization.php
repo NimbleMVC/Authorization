@@ -5,7 +5,13 @@ namespace NimblePHP\Authorization;
 use InvalidArgumentException;
 use krzysztofzylka\DatabaseManager\Exception\DatabaseManagerException;
 use krzysztofzylka\DatabaseManager\Table;
-use Krzysztofzylka\Hash\VersionedHasher;
+use NimblePHP\Authorization\Events\AfterRegisterEvent;
+use NimblePHP\Authorization\Events\BeforeLoginEvent;
+use NimblePHP\Authorization\Events\BeforeRegisterEvent;
+use NimblePHP\Authorization\Events\LoginFailedEvent;
+use NimblePHP\Authorization\Events\LoginSuccessEvent;
+use NimblePHP\Authorization\Events\LogoutEvent;
+use NimblePHP\Authorization\Exceptions\PendingChallengeException;
 use NimblePHP\Authorization\Exceptions\RateLimitExceededException;
 use NimblePHP\Authorization\Exceptions\TwoFactorException;
 use NimblePHP\Authorization\Exceptions\PendingTwoFactorException;
@@ -13,6 +19,7 @@ use NimblePHP\Authorization\Exceptions\ValidationException;
 use NimblePHP\Authorization\Interfaces\TwoFactorProvider;
 use NimblePHP\Authorization\Interfaces\OAuthProvider;
 use NimblePHP\Authorization\Interfaces\TokenProvider;
+use NimblePHP\Authorization\Services\RememberMeService;
 use NimblePHP\Framework\Kernel;
 use NimblePHP\Framework\Session;
 use NimblePHP\Framework\Translation\Translation;
@@ -125,6 +132,14 @@ class Authorization
             throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.password_too_short'));
         }
 
+        // Allow listeners to veto or enrich the registration (password policy, invitations, captcha)
+        /** @var BeforeRegisterEvent $beforeRegisterEvent */
+        $beforeRegisterEvent = Kernel::dispatchEvent(new BeforeRegisterEvent($username, $email, $password));
+
+        if ($beforeRegisterEvent->isRejected()) {
+            throw new ValidationException($beforeRegisterEvent->getRejectReason());
+        }
+
         // Hash password using configured hasher
         $passwordHasher = Config::getPasswordHasher();
         $hashedPassword = $passwordHasher->hash($password);
@@ -139,8 +154,16 @@ class Authorization
         }
 
         $data[Config::getColumn('active')] = Config::isActivationRequired() ? 0 : 1;
+        $data = array_merge($data, $beforeRegisterEvent->extraData);
 
-        return $this->account->insert($data);
+        $result = $this->account->insert($data);
+
+        if ($result) {
+            $accountId = (int)$this->account->getTableInstance()->getId();
+            Kernel::dispatchEvent(new AfterRegisterEvent($accountId, $data));
+        }
+
+        return $result;
     }
 
     /**
@@ -166,6 +189,7 @@ class Authorization
         // Check rate limiting
         if (Config::isRateLimitEnabled() && $this->rateLimiter->isRateLimited($login)) {
             $remaining = $this->rateLimiter->getLockoutTimeRemaining($login);
+            Kernel::dispatchEvent(new LoginFailedEvent($login, LoginFailedEvent::REASON_RATE_LIMITED));
             throw new RateLimitExceededException(Translation::getInstance()->translate('module.authorization.validation.rate_limit_exceeded', ['seconds' => $remaining]), $remaining);
         }
 
@@ -188,14 +212,16 @@ class Authorization
             if (Config::isRateLimitEnabled()) {
                 $this->rateLimiter->recordFailedAttempt($login);
             }
+            Kernel::dispatchEvent(new LoginFailedEvent($login, LoginFailedEvent::REASON_USER_NOT_FOUND));
             throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.invalid_credentials'));
         }
 
-        if (!VersionedHasher::verify($account[Config::$tableName][Config::getColumn('password')], $password)) {
+        if (!Config::getPasswordHasher()->verify($account[Config::$tableName][Config::getColumn('password')], $password)) {
             // Record failed attempt
             if (Config::isRateLimitEnabled()) {
                 $this->rateLimiter->recordFailedAttempt($login);
             }
+            Kernel::dispatchEvent(new LoginFailedEvent($login, LoginFailedEvent::REASON_INVALID_PASSWORD, $account));
             throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.invalid_credentials'));
         }
 
@@ -204,15 +230,36 @@ class Authorization
             if (Config::isRateLimitEnabled()) {
                 $this->rateLimiter->recordFailedAttempt($login);
             }
+            Kernel::dispatchEvent(new LoginFailedEvent($login, LoginFailedEvent::REASON_NOT_ACTIVATED, $account));
             throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.account_not_activated'));
+        }
+
+        // Allow listeners to veto the login (bans, custom business rules)
+        /** @var BeforeLoginEvent $beforeLoginEvent */
+        $beforeLoginEvent = Kernel::dispatchEvent(new BeforeLoginEvent($login, $account));
+
+        if ($beforeLoginEvent->isRejected()) {
+            Kernel::dispatchEvent(new LoginFailedEvent($login, LoginFailedEvent::REASON_REJECTED, $account));
+            throw new ValidationException($beforeLoginEvent->getRejectReason());
+        }
+
+        // A listener requires an additional challenge (e.g. a 2FA module)
+        if ($beforeLoginEvent->getRequiredChallenge() !== null) {
+            $challengeAccountId = (int)$account[Config::$tableName][Config::getColumn('id')];
+            $challengeName = $beforeLoginEvent->getRequiredChallenge();
+            $this->session->set(Config::$challengeSessionKey, $challengeAccountId);
+            $this->session->set(Config::$challengeNameSessionKey, $challengeName);
+
+            throw new PendingChallengeException($challengeAccountId, $challengeName);
         }
 
         $this->account->setId($account[Config::$tableName][Config::getColumn('id')]);
 
         // Check if password needs rehashing and update if necessary
+        // (internal rehash - no password change events)
         $passwordHasher = Config::getPasswordHasher();
         if ($passwordHasher->needsRehash($account[Config::$tableName][Config::getColumn('password')])) {
-            $this->account->changePassword($password);
+            $this->account->changePassword($password, false);
         }
 
         // Successful login - clear rate limit
@@ -233,9 +280,162 @@ class Authorization
             throw new PendingTwoFactorException($userId, $provider, Translation::getInstance()->translate('module.authorization.validation.two_factor_required'));
         }
 
-        $this->session->set(Config::$sessionKey, $account[Config::$tableName][Config::getColumn('id')]);
+        $this->completeLogin((int)$account[Config::$tableName][Config::getColumn('id')], $account, LoginSuccessEvent::METHOD_PASSWORD);
 
         return true;
+    }
+
+    /**
+     * Get the pending login challenge, if any
+     * @return array{accountId: int, challenge: string}|null
+     */
+    public function getPendingChallenge(): ?array
+    {
+        if (!$this->session->exists(Config::$challengeSessionKey)) {
+            return null;
+        }
+
+        return [
+            'accountId' => (int)$this->session->get(Config::$challengeSessionKey),
+            'challenge' => (string)$this->session->get(Config::$challengeNameSessionKey),
+        ];
+    }
+
+    /**
+     * Complete a pending login challenge (call after the challenge module verified the user)
+     * @return bool True when a pending challenge existed and the user was logged in
+     * @throws DatabaseManagerException
+     */
+    public function completeChallenge(): bool
+    {
+        $pending = $this->getPendingChallenge();
+
+        if ($pending === null) {
+            return false;
+        }
+
+        $account = $this->account->find([Config::getColumn('id') => $pending['accountId']]) ?? [];
+        $this->completeLogin($pending['accountId'], $account, $pending['challenge']);
+        $this->session->remove(Config::$challengeSessionKey);
+        $this->session->remove(Config::$challengeNameSessionKey);
+
+        return true;
+    }
+
+    /**
+     * Abort a pending login challenge (e.g. user cancelled)
+     * @return void
+     */
+    public function abortChallenge(): void
+    {
+        $this->session->remove(Config::$challengeSessionKey);
+        $this->session->remove(Config::$challengeNameSessionKey);
+    }
+
+    /**
+     * Authenticate as the given account without password verification
+     *
+     * For modules implementing their own verification (magic links, passkeys,
+     * social login, impersonation). Runs the full completion path: session
+     * regeneration + LoginSuccessEvent with the given method name.
+     * @param int $accountId
+     * @param string $method Method name for LoginSuccessEvent (e.g. 'magic_link')
+     * @return bool False when the account does not exist or is inactive
+     * @throws DatabaseManagerException
+     */
+    public function authenticateAs(int $accountId, string $method = 'external'): bool
+    {
+        $account = $this->account->find([Config::getColumn('id') => $accountId]);
+
+        if (!$account) {
+            return false;
+        }
+
+        if (Config::isActivationRequired() && empty($account[Config::$tableName][Config::getColumn('active')])) {
+            return false;
+        }
+
+        $this->completeLogin($accountId, $account, $method);
+
+        return true;
+    }
+
+    /**
+     * Create a persistent remember-me token for the authenticated user ("remember me" checkbox)
+     * @return void
+     * @throws InvalidArgumentException If user not authenticated or remember-me disabled
+     */
+    public function rememberMe(): void
+    {
+        if (!Config::$rememberMeEnabled) {
+            throw new InvalidArgumentException('Remember-me is disabled (AUTHORIZATION_REMEMBER_ME_ENABLED)');
+        }
+
+        if (!$this->isAuthorized()) {
+            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.validation.invalid_credentials'));
+        }
+
+        (new RememberMeService())->create($this->getAuthorizedId());
+    }
+
+    /**
+     * Try to authenticate using the remember-me cookie
+     * @return bool True when a valid token was found and the user was logged in
+     * @throws DatabaseManagerException
+     */
+    public function loginWithRememberToken(): bool
+    {
+        if (!Config::$rememberMeEnabled) {
+            return false;
+        }
+
+        $rememberMe = new RememberMeService();
+        $accountId = $rememberMe->check();
+
+        if ($accountId === null) {
+            return false;
+        }
+
+        $account = $this->account->find([Config::getColumn('id') => $accountId]);
+
+        if (!$account) {
+            $rememberMe->invalidateAll($accountId);
+            $rememberMe->forget();
+
+            return false;
+        }
+
+        if (Config::isActivationRequired() && empty($account[Config::$tableName][Config::getColumn('active')])) {
+            $rememberMe->invalidateAll($accountId);
+            $rememberMe->forget();
+
+            return false;
+        }
+
+        $this->completeLogin($accountId, $account, LoginSuccessEvent::METHOD_REMEMBER_ME);
+
+        return true;
+    }
+
+    /**
+     * Finalize authentication: regenerate session (fixation protection) and dispatch event
+     * @param int $accountId
+     * @param array $account
+     * @param string $method One of LoginSuccessEvent::METHOD_* constants
+     * @return void
+     */
+    private function completeLogin(int $accountId, array $account, string $method): void
+    {
+        $currentId = $this->session->exists(Config::$sessionKey)
+            ? (int)$this->session->get(Config::$sessionKey)
+            : null;
+
+        if (Config::$regenerateSessionOnLogin && $currentId !== $accountId) {
+            $this->session->regenerate(true);
+        }
+
+        $this->session->set(Config::$sessionKey, $accountId);
+        Kernel::dispatchEvent(new LoginSuccessEvent($accountId, $account, $method));
     }
 
     /**
@@ -306,9 +506,18 @@ class Authorization
      */
     public function logout(): void
     {
+        $accountId = $this->isAuthorized() ? $this->getAuthorizedId() : null;
+
         $this->session->remove(Config::$sessionKey);
         $this->session->remove(Config::$twoFactorSessionKey);
         $this->session->remove(Config::$twoFactorProviderSessionKey);
+        $this->abortChallenge();
+
+        if (Config::$rememberMeEnabled) {
+            (new RememberMeService())->forget();
+        }
+
+        Kernel::dispatchEvent(new LogoutEvent($accountId));
     }
 
     /**
@@ -407,12 +616,13 @@ class Authorization
         if (!$provider->verify($secret, $code)) {
             // Check if it's a recovery code
             if (!$provider->verifyRecoveryCode($secret, $code)) {
+                Kernel::dispatchEvent(new LoginFailedEvent((string)$pendingUserId, LoginFailedEvent::REASON_INVALID_TWO_FACTOR, $userAccount));
                 throw new TwoFactorException(Translation::getInstance()->translate('module.authorization.validation.invalid_2fa_code'));
             }
         }
 
         // Code verified successfully - complete the login
-        $this->session->set(Config::$sessionKey, $pendingUserId);
+        $this->completeLogin((int)$pendingUserId, $userAccount, LoginSuccessEvent::METHOD_TWO_FACTOR);
         $this->session->remove(Config::$twoFactorSessionKey);
         $this->session->remove(Config::$twoFactorProviderSessionKey);
 
@@ -504,17 +714,7 @@ class Authorization
             return false;
         }
 
-        $userId = $this->getAuthorizedId();
-        $role = new Role();
-        $roleData = $role->findByName($roleName);
-
-        if (!$roleData) {
-            return false;
-        }
-
-        $role->setId($roleData[Config::getRoleTableName()][Config::getRoleColumn('id')]);
-
-        return $role->userHasRole($userId);
+        return Config::getPermissionProvider()->hasRole($this->getAuthorizedId(), $roleName);
     }
 
     /**
@@ -529,20 +729,7 @@ class Authorization
             return false;
         }
 
-        $userRoles = $this->getUserRoles();
-
-        foreach ($userRoles as $roleData) {
-            $role = new Role($roleData[Config::getRoleTableName()][Config::getRoleColumn('id')]);
-            $permissions = $role->getPermissions();
-
-            foreach ($permissions as $permission) {
-                if ($permission[Config::getPermissionTableName()][Config::getPermissionColumn('name')] === $permissionName) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return Config::getPermissionProvider()->hasPermission($this->getAuthorizedId(), $permissionName);
     }
 
     /**
@@ -880,7 +1067,7 @@ class Authorization
             $accountTable->insert($accountData);
             $existingUser = $accountTable->findByField('email', $oauthData['email'] ?? '');
         } else {
-            $userId = $existingUser[$tableName][Config::getAccountColumn('id')];
+            $userId = $existingUser[$tableName][Config::getColumn('id')];
             $this->account->updateOAuthData($userId, $oauthData['oauth_id'], $oauthData['provider']);
         }
 
@@ -888,8 +1075,7 @@ class Authorization
             throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.failed_create_user_account'));
         }
 
-        $userId = $existingUser[$tableName][Config::getAccountColumn('id')];
-        $this->session->set(Config::getSessionKey(), $userId);
+        $this->completeLogin((int)$existingUser[$tableName][Config::getColumn('id')], $existingUser, LoginSuccessEvent::METHOD_OAUTH);
 
         return true;
     }
@@ -950,8 +1136,7 @@ class Authorization
     {
         try {
             $tokenData = $this->validateToken($token, $tokenType);
-            $userId = $tokenData['user_id'];
-            $this->session->set(Config::getSessionKey(), $userId);
+            $this->completeLogin((int)$tokenData['user_id'], [], LoginSuccessEvent::METHOD_TOKEN);
             return true;
         } catch (\Exception $e) {
             return false;

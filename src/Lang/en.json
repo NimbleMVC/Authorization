@@ -9,12 +9,12 @@
         "email_exists":  "Email already exists",
         "password_empty":  "Password cannot be empty",
         "password_too_short":  "Password must be at least 6 characters long",
-        "login_empty":  "{field} cannot be empty",
+        "login_empty":  ":field cannot be empty",
         "credentials_empty":  "Username and password cannot be empty",
         "invalid_credentials":  "Invalid username or password",
         "account_not_activated":  "Account has not been activated",
         "authorization_header_missing":  "Authorization header is missing",
-        "rate_limit_exceeded":  "Too many login attempts. Please try again in {seconds} seconds",
+        "rate_limit_exceeded":  "Too many login attempts. Please try again in :seconds seconds",
         "two_factor_required":  "Two-factor authentication is required",
         "invalid_2fa_code":  "Invalid or expired 2FA code"
       },
@@ -23,7 +23,7 @@
         "user_must_be_authenticated_2fa_disable":  "User must be authenticated to disable 2FA",
         "no_pending_2fa":  "No pending 2FA verification",
         "user_id_mismatch":  "User ID mismatch",
-        "2fa_provider_not_configured":  "2FA provider not configured: {provider}",
+        "2fa_provider_not_configured":  "2FA provider not configured: :provider",
         "user_not_found":  "User not found",
         "2fa_not_enabled":  "2FA not enabled for user"
       },
@@ -51,11 +51,11 @@
         "role_already_exists": "Role already exists",
         "bcrypt_invalid_cost": "Cost must be between 4 and 31",
         "identifier_empty": "Identifier cannot be empty",
-        "user_missing_role": "User does not have required role: {role}",
-        "user_missing_all_roles": "User does not have all of the required roles: {roles}",
-        "user_missing_permission": "User does not have required permission: {permission}",
-        "user_missing_any_permission": "User does not have any of the required permissions: {permissions}",
-        "user_missing_any_role": "User does not have any of the required roles: {roles}"
+        "user_missing_role": "User does not have required role: :role",
+        "user_missing_all_roles": "User does not have all of the required roles: :roles",
+        "user_missing_permission": "User does not have required permission: :permission",
+        "user_missing_any_permission": "User does not have any of the required permissions: :permissions",
+        "user_missing_any_role": "User does not have any of the required roles: :roles"
       }
     }
   }
