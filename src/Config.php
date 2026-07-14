@@ -209,6 +209,21 @@ class Config
      */
     public static string $rememberMeTableName = 'account_remember_tokens';
 
+    /**
+     * Minimum age (seconds) a remember-me token must reach before it is
+     * rotated again. Rotating on literally every use is a single-use-token
+     * race: a page load fires several concurrent requests (assets, AJAX)
+     * carrying the same not-yet-rotated cookie value; the first to be
+     * processed rotates it, and every other concurrent request then finds
+     * the selector already deleted and clears the user's cookie, logging
+     * them out well before the token's real lifetime. Throttling rotation
+     * means a realistic burst of concurrent requests (milliseconds apart)
+     * shares the same still-valid token instead of racing to replace it,
+     * while rotation still happens periodically for theft-detection.
+     * @var int
+     */
+    public static int $rememberMeRotationInterval = 300; // 5 minutes
+
     // ===== Two-Factor Authentication Configuration =====
 
     /**
@@ -323,6 +338,7 @@ class Config
         self::$rememberMeCookieName = $_ENV['AUTHORIZATION_REMEMBER_ME_COOKIE'] ?? 'remember_token';
         self::$rememberMeLifetime = (int)($_ENV['AUTHORIZATION_REMEMBER_ME_LIFETIME'] ?? 2592000);
         self::$rememberMeTableName = $_ENV['AUTHORIZATION_REMEMBER_ME_TABLE'] ?? 'account_remember_tokens';
+        self::$rememberMeRotationInterval = (int)($_ENV['AUTHORIZATION_REMEMBER_ME_ROTATION_INTERVAL'] ?? 300);
 
         self::initRbac();
     }

@@ -102,6 +102,20 @@ class RememberMeService
 
         Kernel::dispatchEvent(new RememberTokenUsedEvent($accountId, $selector));
 
+        // Rotating on every use races: concurrent requests from the same
+        // page load (assets/AJAX) carry the same not-yet-rotated cookie, the
+        // first one to be processed rotates it, and every other concurrent
+        // request then finds the selector already deleted and clears the
+        // user's cookie - a real logout well before the token's lifetime.
+        // Throttle rotation instead of skipping it: a token still gets
+        // replaced periodically (theft-detection keeps working), but a
+        // realistic burst of concurrent requests shares the same token.
+        $ageSeconds = time() - strtotime((string)($token['date_created'] ?? 'now'));
+
+        if ($ageSeconds < Config::$rememberMeRotationInterval) {
+            return $accountId;
+        }
+
         // Rotate: single-use token
         $table->delete((int)$token['id']);
         $this->create($accountId);
