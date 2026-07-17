@@ -8,6 +8,11 @@
       "NimblePHP\\Authorization\\": "src/"
     }
   },
+  "autoload-dev": {
+    "psr-4": {
+      "NimblePHP\\Authorization\\Tests\\": "tests/"
+    }
+  },
   "authors": [
     {
       "name": "Krzysztof Żyłka",
@@ -19,5 +24,11 @@
     "nimblephp/framework": "^0.4.1",
     "krzysztofzylka/hash": "^2.0",
     "nimblephp/migrations": "^0.3.0"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.5"
+  },
+  "scripts": {
+    "test": "phpunit"
   }
 }

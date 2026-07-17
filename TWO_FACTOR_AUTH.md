@@ -367,13 +367,8 @@ Kody odzyskania pozwalają użytkownikowi zalogować się, jeśli utraci dostęp
 ### Generowanie kodów odzyskania
 
 ```php
-use NimblePHP\Authorization\Config;
-
-$totp = Config::getTwoFactorProvider('totp');
-$secret = $userSecret; // Pobierz z bazy danych
-
-// Generuj 10 kodów odzyskania
-$recoveryCodes = $totp->getRecoveryCodes($secret, 10);
+$result = $auth->enableTwoFactorAuth($totp);
+$recoveryCodes = $result['recovery_codes'];
 
 foreach ($recoveryCodes as $code) {
     echo "Kod: $code\n";
@@ -382,38 +377,36 @@ foreach ($recoveryCodes as $code) {
 
 ### Przechowywanie kodów odzyskania
 
-Rekomendujemy przechowywać kody odzyskania w bazie danych:
+Migracja modułu tworzy tabelę `account_two_factor_recovery_codes`. Moduł zapisuje
+wyłącznie kosztowne hashe kodów wraz z kontem i terminem ważności. Jawne kody są
+dostępne tylko w wyniku włączenia 2FA lub regeneracji i należy pokazać je
+użytkownikowi dokładnie raz.
 
-```php
-// Dodaj kolumnę do tabeli accounts
-ALTER TABLE accounts ADD COLUMN recovery_codes JSON NULL;
-
-// Przechowuj skrótowane kody
-$hashedCodes = array_map(function($code) {
-    return hash('sha256', $code);
-}, $recoveryCodes);
-
-// Zapisz do bazy
-$account->update(['recovery_codes' => json_encode($hashedCodes)]);
-```
+Nazwę tabeli i czas ważności można ustawić przez
+`AUTHORIZATION_RECOVERY_CODE_TABLE` oraz `AUTHORIZATION_RECOVERY_CODE_LIFETIME`.
 
 ### Użycie kodu odzyskania podczas logowania
 
 ```php
 // Użytkownik może wpisać kod odzyskania zamiast kodu 2FA
 try {
-    // Kod odzyskania jest weryfikowany jako zwykły kod 2FA
+    // Metoda najpierw sprawdza TOTP, a następnie przypisany do konta kod odzyskania.
+    // Poprawny kod odzyskania jest zużywany atomowo i nie zadziała ponownie.
     $verified = $auth->verifyTwoFactorCode($_POST['2fa_code']);
     
     if ($verified) {
-        // Usuń użyty kod z bazy danych
-        removeUsedRecoveryCode($auth->getAuthorizedId(), $_POST['2fa_code']);
-        
         echo "Zalogowano za pomocą kodu odzyskania";
     }
 } catch (TwoFactorException $e) {
     echo "Nieprawidłowy kod";
 }
+```
+
+Nowy zestaw, który automatycznie unieważnia poprzedni, można wygenerować tylko
+dla zalogowanego konta:
+
+```php
+$recoveryCodes = $auth->regenerateRecoveryCodes();
 ```
 
 ## Bezpieczeństwo
@@ -545,6 +538,7 @@ $emailProvider->setEmailCallback(function($email, $code) {
 
 - `enableTwoFactorAuth(TwoFactorProvider $provider): array`
 - `verifyTwoFactorCode(string $code, ?string $userId = null): bool`
+- `regenerateRecoveryCodes(): array`
 - `disableTwoFactorAuth(): bool`
 - `isTwoFactorEnabled(?int $userId = null): bool`
 - `getPendingTwoFactorUserId(): ?int`
@@ -560,7 +554,7 @@ $emailProvider->setEmailCallback(function($email, $code) {
 - `getQRCodeURI(string $secret, string $accountName, ?string $issuer = null): string`
 - `getQRCodeImageURL(string $secret, string $accountName, int $size = 300, ?string $issuer = null): string`
 - `getRecoveryCodes(string $secret, int $count = 10): array`
-- `verifyRecoveryCode(string $secret, string $code): bool`
+- `verifyRecoveryCode(string $secret, string $code): bool` — przestarzałe; zawsze `false`, ponieważ bez konta i magazynu nie da się bezpiecznie zweryfikować kodu
 
 ### EmailProvider
 
@@ -580,4 +574,3 @@ $emailProvider->setEmailCallback(function($email, $code) {
 - `getTwoFactorProviders(): array`
 - `getTwoFactorSecretColumn(): string`
 - `getTwoFactorProviderColumn(): string`
-

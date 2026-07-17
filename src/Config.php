@@ -260,6 +260,18 @@ class Config
     ];
 
     /**
+     * Table containing hashed, single-use recovery codes.
+     * @var string
+     */
+    public static string $recoveryCodeTableName = 'account_two_factor_recovery_codes';
+
+    /**
+     * Recovery-code validity period in seconds.
+     * @var int
+     */
+    public static int $recoveryCodeLifetime = 31536000; // 1 year
+
+    /**
      * Array of available 2FA providers
      * @var array<string, TwoFactorProvider>
      */
@@ -339,6 +351,8 @@ class Config
         self::$rememberMeLifetime = (int)($_ENV['AUTHORIZATION_REMEMBER_ME_LIFETIME'] ?? 2592000);
         self::$rememberMeTableName = $_ENV['AUTHORIZATION_REMEMBER_ME_TABLE'] ?? 'account_remember_tokens';
         self::$rememberMeRotationInterval = (int)($_ENV['AUTHORIZATION_REMEMBER_ME_ROTATION_INTERVAL'] ?? 300);
+        self::$recoveryCodeTableName = $_ENV['AUTHORIZATION_RECOVERY_CODE_TABLE'] ?? 'account_two_factor_recovery_codes';
+        self::$recoveryCodeLifetime = (int)($_ENV['AUTHORIZATION_RECOVERY_CODE_LIFETIME'] ?? 31536000);
 
         self::initRbac();
     }

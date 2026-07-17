@@ -364,21 +364,22 @@ TOTP provider generuje kody odzyskania, które użytkownik może użyć jeśli u
 
 ```php
 $totp = Config::getTwoFactorProvider('totp');
-$secret = 'JBSWY3DPEBLW64TMMQ'; // Sekret użytkownika
 
-// Generuj kody odzyskania
-$recoveryCodes = $totp->getRecoveryCodes($secret, 10); // Generuj 10 kodów
+// Włączenie 2FA generuje i zapisuje hashe kodów automatycznie.
+$result = $auth->enableTwoFactorAuth($totp);
+$recoveryCodes = $result['recovery_codes'];
 
 // Wyświetl użytkownikowi - powinien je zapisać w bezpiecznym miejscu
 foreach ($recoveryCodes as $code) {
     echo $code . "\n";
 }
 
-// Weryfikacja kodu odzyskania podczas logowania
-if ($totp->verifyRecoveryCode($secret, $_POST['recovery_code'])) {
-    // Kod jest ważny - zaloguj użytkownika
-    $auth->verifyTwoFactorCode($_POST['recovery_code']);
-}
+// Ten sam bezpieczny przepływ weryfikuje TOTP lub atomowo zużywa
+// przypisany do konta kod odzyskania.
+$auth->verifyTwoFactorCode($_POST['recovery_code']);
+
+// Wygenerowanie nowego zestawu unieważnia wszystkie poprzednie kody.
+$newRecoveryCodes = $auth->regenerateRecoveryCodes();
 ```
 
 ## Funkcjonalności

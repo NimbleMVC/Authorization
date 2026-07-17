@@ -67,9 +67,12 @@ interface TwoFactorProvider
     public function getRecoveryCodes(string $secret): array;
 
     /**
-     * Verify and consume a recovery code
+     * Verify and consume a recovery code when the provider owns a secure,
+     * account-bound persistent store. Providers without that context must
+     * fail closed by returning false.
      *
-     * Recovery codes should be marked as used after verification.
+     * The built-in Authorization flow uses RecoveryCodeService instead so it
+     * can bind the code to the pending account and consume it atomically.
      *
      * @param string $secret The 2FA secret key
      * @param string $code The recovery code to verify
