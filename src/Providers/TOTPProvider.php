@@ -191,28 +191,38 @@ class TOTPProvider implements TwoFactorProvider
      */
     public function getRecoveryCodes(string $secret, int $count = 10): array
     {
-        $codes = [];
-        for ($i = 0; $i < $count; $i++) {
-            $code = substr(str_shuffle('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'), 0, 8);
-            $codes[] = chunk_split($code, 4, '-');
+        if ($count < 1) {
+            return [];
         }
-        return $codes;
+
+        $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        $lastIndex = strlen($alphabet) - 1;
+        $codes = [];
+
+        while (count($codes) < $count) {
+            $characters = '';
+
+            for ($i = 0; $i < 8; $i++) {
+                $characters .= $alphabet[random_int(0, $lastIndex)];
+            }
+
+            $code = substr($characters, 0, 4) . '-' . substr($characters, 4);
+            $codes[$code] = $code;
+        }
+
+        return array_values($codes);
     }
 
     /**
-     * Verify a recovery code
+     * Recovery-code verification requires account-bound persistent storage.
+     * Use Authorization::verifyTwoFactorCode(), which delegates to
+     * RecoveryCodeService and atomically consumes a matching stored hash.
      *
-     * Recovery codes are stored separately and marked as used after verification.
-     * This is a basic implementation - you may need to extend this in your application
-     * to store and track used recovery codes in your database.
-     *
-     * @param string $secret Not used for recovery code verification
-     * @param string $code The recovery code to verify
-     * @return bool True if code is valid format
+     * @deprecated Direct provider verification cannot prove that a code was issued.
      */
     public function verifyRecoveryCode(string $secret, string $code): bool
     {
-        return preg_match('/^[A-Z0-9]{4}-[A-Z0-9]{4}$/', strtoupper($code)) === 1;
+        return false;
     }
 
     /**

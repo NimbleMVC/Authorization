@@ -19,6 +19,7 @@ use NimblePHP\Authorization\Exceptions\ValidationException;
 use NimblePHP\Authorization\Interfaces\TwoFactorProvider;
 use NimblePHP\Authorization\Interfaces\OAuthProvider;
 use NimblePHP\Authorization\Interfaces\TokenProvider;
+use NimblePHP\Authorization\Services\RecoveryCodeService;
 use NimblePHP\Authorization\Services\RememberMeService;
 use NimblePHP\Framework\Kernel;
 use NimblePHP\Framework\Session;
@@ -56,6 +57,12 @@ class Authorization
     private RateLimiter $rateLimiter;
 
     /**
+     * Account-bound, single-use recovery codes.
+     * @var RecoveryCodeService
+     */
+    private RecoveryCodeService $recoveryCodeService;
+
+    /**
      * Construct the Authorization instance
      */
     public function __construct()
@@ -63,6 +70,7 @@ class Authorization
         $this->session = Kernel::$serviceContainer->get('kernel.session');
         $this->account = new Account();
         $this->rateLimiter = new RateLimiter();
+        $this->recoveryCodeService = new RecoveryCodeService();
     }
 
     /**
@@ -524,7 +532,7 @@ class Authorization
      * Enable 2FA for the currently authenticated user
      *
      * @param TwoFactorProvider $provider The 2FA provider to use
-     * @return array{secret: string, qr_code: ?string} Array with secret and QR code URL (if applicable)
+     * @return array{secret: string, provider: string, qr_code: ?string, recovery_codes: array<int, string>}
      * @throws InvalidArgumentException If user not authenticated
      * @throws DatabaseManagerException
      */
@@ -545,7 +553,16 @@ class Authorization
             'secret' => $secret,
             'provider' => $provider->getName(),
             'qr_code' => null,
+            'recovery_codes' => [],
         ];
+
+        $generatedCodes = $provider->getRecoveryCodes($secret);
+
+        if ($generatedCodes !== []) {
+            $result['recovery_codes'] = $this->recoveryCodeService->replaceForAccount($userId, $generatedCodes);
+        } else {
+            $this->recoveryCodeService->invalidateForAccount($userId);
+        }
 
         // Generate QR code for TOTP provider
         if (method_exists($provider, 'getQRCodeImageURL')) {
@@ -614,8 +631,8 @@ class Authorization
 
         // Verify the code
         if (!$provider->verify($secret, $code)) {
-            // Check if it's a recovery code
-            if (!$provider->verifyRecoveryCode($secret, $code)) {
+            // Recovery codes are account-bound hashes and are consumed atomically.
+            if (!$this->recoveryCodeService->consume((int)$pendingUserId, $code)) {
                 Kernel::dispatchEvent(new LoginFailedEvent((string)$pendingUserId, LoginFailedEvent::REASON_INVALID_TWO_FACTOR, $userAccount));
                 throw new TwoFactorException(Translation::getInstance()->translate('module.authorization.validation.invalid_2fa_code'));
             }
@@ -645,7 +662,48 @@ class Authorization
         $userId = $this->getAuthorizedId();
         $this->account->setId($userId);
 
-        return $this->account->clearTwoFactorSecret();
+        $disabled = $this->account->clearTwoFactorSecret();
+
+        if ($disabled) {
+            $this->recoveryCodeService->invalidateForAccount($userId);
+        }
+
+        return $disabled;
+    }
+
+    /**
+     * Replace all recovery codes for the authenticated account.
+     *
+     * The returned plain-text values are available only in this response.
+     * Calling this method invalidates every previously issued recovery code.
+     *
+     * @return array<int, string>
+     * @throws InvalidArgumentException If the account is not authenticated or 2FA is unavailable
+     * @throws DatabaseManagerException
+     */
+    public function regenerateRecoveryCodes(): array
+    {
+        if (!$this->isAuthorized()) {
+            throw new InvalidArgumentException('User must be authenticated to regenerate recovery codes');
+        }
+
+        $userId = $this->getAuthorizedId();
+        $this->account->setId($userId);
+        $userAccount = $this->account->getAccount();
+        $providerName = $userAccount[Config::$tableName][Config::getTwoFactorProviderColumn()] ?? null;
+        $secret = $userAccount[Config::$tableName][Config::getTwoFactorSecretColumn()] ?? null;
+
+        if (!is_string($providerName) || !is_string($secret) || $secret === '') {
+            throw new InvalidArgumentException('Two-factor authentication is not enabled');
+        }
+
+        $provider = Config::getTwoFactorProvider($providerName);
+
+        if (!$provider instanceof TwoFactorProvider) {
+            throw new InvalidArgumentException('Two-factor provider is not configured');
+        }
+
+        return $this->recoveryCodeService->generateForAccount($userId, $provider, $secret);
     }
 
     /**
