@@ -172,6 +172,7 @@ class OAuthController
         try {
             // Pobierz kod z query string
             $code = $_GET['code'] ?? null;
+            $state = $_GET['state'] ?? null;
             $error = $_GET['error'] ?? null;
             $errorDescription = $_GET['error_description'] ?? null;
             
@@ -183,12 +184,12 @@ class OAuthController
                 throw new \Exception($msg);
             }
             
-            if (!$code) {
-                throw new \Exception('Brak kodu autoryzacyjnego. Spróbuj ponownie.');
+            if (!$code || !$state) {
+                throw new \Exception('Brak kodu autoryzacyjnego lub state. Spróbuj ponownie.');
             }
             
             // Obsłuż callback i pobierz dane użytkownika
-            $userData = $auth->handleOAuthCallback($code, 'github');
+            $userData = $auth->handleOAuthCallback($code, 'github', $state);
             
             // Zaloguj użytkownika
             // Parametr createIfNotExists:
@@ -252,8 +253,15 @@ class GoogleProvider implements OAuthProvider
         $this->clientSecret = $clientSecret;
     }
 
-    public function getAuthorizationUrl(string $redirectUri, array $scopes = []): string
-    {
+    public function getAuthorizationUrl(
+        string $redirectUri,
+        array $scopes = [],
+        ?string $state = null
+    ): string {
+        if ($state === null || $state === '') {
+            throw new \InvalidArgumentException('OAuth state is required');
+        }
+
         if (empty($scopes)) {
             $scopes = ['openid', 'profile', 'email'];
         }
@@ -264,6 +272,7 @@ class GoogleProvider implements OAuthProvider
             'response_type' => 'code',
             'scope' => implode(' ', $scopes),
             'access_type' => 'offline',
+            'state' => $state,
         ]);
     }
 
@@ -348,7 +357,20 @@ Config::registerOAuthProvider('google', $googleProvider);
 
 ### 1. State Parameter
 
-GitHub provider automatycznie generuje i waliduje parametr `state` dla ochrony przed atakami CSRF.
+Warstwa `Authorization` generuje 256-bitowy `state` przez `random_bytes(32)`.
+W sesji przechowuje wyłącznie SHA-256 oraz związane z przepływem: nazwę
+providera, dokładny redirect URI i termin wygaśnięcia. Callback wymaga wartości
+`state` zwróconej w query string, porównuje hash przez `hash_equals()` i usuwa
+cały pending flow przed wymianą kodu na token. Dzięki temu brak lub mismatch
+`state`, inny provider, wygaśnięcie i replay są odrzucane.
+
+```env
+AUTHORIZATION_OAUTH_FLOW_SESSION_KEY=oauth_flow
+AUTHORIZATION_OAUTH_STATE_LIFETIME=600
+```
+
+PKCE nie jest jeszcze implementowane; pozostaje zalecanym kolejnym
+utwardzeniem przepływu authorization code.
 
 ### 2. HTTPS
 
@@ -511,17 +533,18 @@ class AuthController
     {
         try {
             $code = $_GET['code'] ?? null;
+            $state = $_GET['state'] ?? null;
             $error = $_GET['error'] ?? null;
 
             if ($error) {
                 throw new \Exception($_GET['error_description'] ?? 'Nieznany błąd');
             }
 
-            if (!$code) {
-                throw new \Exception('Brak kodu autoryzacyjnego');
+            if (!$code || !$state) {
+                throw new \Exception('Brak kodu autoryzacyjnego lub state');
             }
 
-            $userData = $this->auth->handleOAuthCallback($code, 'github');
+            $userData = $this->auth->handleOAuthCallback($code, 'github', $state);
             $this->auth->loginWithOAuth($userData);
 
             header('Location: /dashboard');
