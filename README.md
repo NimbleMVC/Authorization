@@ -1299,14 +1299,14 @@ $auth = new Authorization();
 
 try {
     $code = $_GET['code'] ?? null;
+    $state = $_GET['state'] ?? null;
     
-    if (!$code) {
-        throw new \Exception('Brak kodu autoryzacyjnego');
+    if (!$code || !$state) {
+        throw new \Exception('Brak kodu autoryzacyjnego lub state');
     }
     
-    // Obsługa callbacku i pobieranie danych użytkownika
-    $redirectUri = 'https://twoja-domena.com/oauth/github/callback';
-    $userData = $auth->handleOAuthCallback($code, 'github');
+    // State jest wymagany, ma krótki TTL i może zostać użyty tylko raz.
+    $userData = $auth->handleOAuthCallback($code, 'github', $state);
     
     // Logowanie użytkownika (tworzy konto jeśli nie istnieje)
     if ($auth->loginWithOAuth($userData)) {
@@ -1357,18 +1357,25 @@ class GoogleProvider implements OAuthProvider
         $this->clientSecret = $clientSecret;
     }
     
-    public function getAuthorizationUrl(string $state): string
-    {
+    public function getAuthorizationUrl(
+        string $redirectUri,
+        array $scopes = [],
+        ?string $state = null
+    ): string {
+        if ($state === null || $state === '') {
+            throw new \InvalidArgumentException('OAuth state is required');
+        }
+
         return 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query([
             'client_id' => $this->clientId,
-            'redirect_uri' => 'https://twoja-domena.com/oauth/google/callback',
+            'redirect_uri' => $redirectUri,
             'response_type' => 'code',
-            'scope' => 'openid profile email',
+            'scope' => implode(' ', $scopes ?: ['openid', 'profile', 'email']),
             'state' => $state,
         ]);
     }
     
-    public function exchangeCodeForToken(string $code): array
+    public function exchangeCodeForToken(string $code, string $redirectUri): string
     {
         // Implementacja wymiany kodu na token
     }
@@ -1404,7 +1411,12 @@ $googleProvider = new \MyApp\OAuth\GoogleProvider('CLIENT_ID', 'CLIENT_SECRET');
 
 ### Bezpieczeństwo OAuth2
 
-- Stan jest generowany losowo i walidowany podczas callbacku (ochrona przed CSRF)
+- `Authorization` generuje 256-bitowy `state`, zapisuje w sesji tylko SHA-256
+  wraz z providerem, redirect URI i TTL, a callback zużywa stan jednorazowo
+- Callback musi przekazać `state` z query string; brak, mismatch, wygaśnięcie,
+  inny provider i replay są odrzucane przed wymianą kodu na token
+- TTL ustawia `AUTHORIZATION_OAUTH_STATE_LIFETIME` (domyślnie 600 sekund),
+  a klucz sesji `AUTHORIZATION_OAUTH_FLOW_SESSION_KEY` (domyślnie `oauth_flow`)
 - Dane OAuth są przechowywane w kolumnach `account_oauth_id` i `account_oauth_provider`
 - Logowanie OAuth obsługuje matching e-maila - jeśli użytkownik z tym e-mailem już istnieje, jego konto jest połączone
 - Można wymusić tworzenie nowych kont poprzez parametr `createIfNotExists`

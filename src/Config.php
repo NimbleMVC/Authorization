@@ -289,6 +289,18 @@ class Config
     ];
 
     /**
+     * Session key containing the pending, single-use OAuth flow.
+     * @var string
+     */
+    public static string $oauthFlowSessionKey = 'oauth_flow';
+
+    /**
+     * OAuth state validity period in seconds.
+     * @var int
+     */
+    public static int $oauthStateLifetime = 600;
+
+    /**
      * Array of available OAuth providers
      * @var array<string, OAuthProvider>
      */
@@ -353,6 +365,8 @@ class Config
         self::$rememberMeRotationInterval = (int)($_ENV['AUTHORIZATION_REMEMBER_ME_ROTATION_INTERVAL'] ?? 300);
         self::$recoveryCodeTableName = $_ENV['AUTHORIZATION_RECOVERY_CODE_TABLE'] ?? 'account_two_factor_recovery_codes';
         self::$recoveryCodeLifetime = (int)($_ENV['AUTHORIZATION_RECOVERY_CODE_LIFETIME'] ?? 31536000);
+        self::$oauthFlowSessionKey = $_ENV['AUTHORIZATION_OAUTH_FLOW_SESSION_KEY'] ?? 'oauth_flow';
+        self::$oauthStateLifetime = (int)($_ENV['AUTHORIZATION_OAUTH_STATE_LIFETIME'] ?? 600);
 
         self::initRbac();
     }

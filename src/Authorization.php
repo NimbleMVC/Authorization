@@ -1044,11 +1044,22 @@ class Authorization
      */
     public function initiateOAuthLogin(string $providerName, string $redirectUri): string
     {
-        $provider = $this->getOAuthProvider($providerName);
-        $authUrl = $provider->getAuthorizationUrl($redirectUri);
+        if ($redirectUri === '') {
+            throw new InvalidArgumentException('OAuth redirect URI cannot be empty');
+        }
 
-        $this->session->set('oauth_provider', $providerName);
-        $this->session->set('oauth_redirect_uri', $redirectUri);
+        $provider = $this->getOAuthProvider($providerName);
+        $state = bin2hex(random_bytes(32));
+        $authUrl = $provider->getAuthorizationUrl($redirectUri, [], $state);
+
+        $this->session->set(Config::$oauthFlowSessionKey, [
+            'state_hash' => hash('sha256', $state),
+            'provider' => $providerName,
+            'redirect_uri' => $redirectUri,
+            'expires_at' => time() + max(1, Config::$oauthStateLifetime),
+        ]);
+        $this->session->remove('oauth_provider');
+        $this->session->remove('oauth_redirect_uri');
 
         return $authUrl;
     }
@@ -1060,26 +1071,55 @@ class Authorization
      *
      * @param string $code Authorization code from provider
      * @param string $providerName OAuth provider name
+     * @param string $state State returned by the OAuth provider
      * @return array User data from OAuth provider
-     * @throws InvalidArgumentException If provider not registered
+     * @throws InvalidArgumentException If the pending flow or state is invalid
      * @throws \Exception If token exchange fails
      */
-    public function handleOAuthCallback(string $code, string $providerName): array
+    public function handleOAuthCallback(string $code, string $providerName, string $state): array
     {
+        $flow = $this->consumeOAuthFlow($providerName, $state);
         $provider = $this->getOAuthProvider($providerName);
-        $redirectUri = $this->session->get('oauth_redirect_uri');
-
-        if (!$redirectUri) {
-            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.oauth_session_expired'));
-        }
+        $redirectUri = $flow['redirect_uri'];
 
         $accessToken = $provider->exchangeCodeForToken($code, $redirectUri);
         $userData = $provider->getUserData($accessToken);
 
+        return array_merge($userData, ['provider' => $providerName]);
+    }
+
+    /**
+     * Validate and consume the pending OAuth flow before external requests.
+     *
+     * @return array{state_hash: string, provider: string, redirect_uri: string, expires_at: int}
+     */
+    private function consumeOAuthFlow(string $providerName, string $state): array
+    {
+        $flow = $this->session->get(Config::$oauthFlowSessionKey);
+
+        // A callback attempt is single-use even when validation fails.
+        $this->session->remove(Config::$oauthFlowSessionKey);
         $this->session->remove('oauth_provider');
         $this->session->remove('oauth_redirect_uri');
 
-        return array_merge($userData, ['provider' => $providerName]);
+        if (
+            !is_array($flow)
+            || !isset($flow['state_hash'], $flow['provider'], $flow['redirect_uri'], $flow['expires_at'])
+            || !is_string($flow['state_hash'])
+            || !is_string($flow['provider'])
+            || !is_string($flow['redirect_uri'])
+            || !is_int($flow['expires_at'])
+            || $flow['redirect_uri'] === ''
+            || $flow['expires_at'] <= time()
+            || $state === ''
+            || strlen($state) > 512
+            || !hash_equals($flow['provider'], $providerName)
+            || !hash_equals($flow['state_hash'], hash('sha256', $state))
+        ) {
+            throw new InvalidArgumentException('Invalid or expired OAuth state');
+        }
+
+        return $flow;
     }
 
     /**
