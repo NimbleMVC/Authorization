@@ -4,7 +4,6 @@ namespace NimblePHP\Authorization;
 
 use InvalidArgumentException;
 use krzysztofzylka\DatabaseManager\Exception\DatabaseManagerException;
-use krzysztofzylka\DatabaseManager\Table;
 use NimblePHP\Authorization\Events\AfterRegisterEvent;
 use NimblePHP\Authorization\Events\BeforeLoginEvent;
 use NimblePHP\Authorization\Events\BeforeRegisterEvent;
@@ -12,6 +11,7 @@ use NimblePHP\Authorization\Events\LoginFailedEvent;
 use NimblePHP\Authorization\Events\LoginSuccessEvent;
 use NimblePHP\Authorization\Events\LogoutEvent;
 use NimblePHP\Authorization\Exceptions\PendingChallengeException;
+use NimblePHP\Authorization\Exceptions\OAuthAccountLinkRequiredException;
 use NimblePHP\Authorization\Exceptions\RateLimitExceededException;
 use NimblePHP\Authorization\Exceptions\TwoFactorException;
 use NimblePHP\Authorization\Exceptions\PendingTwoFactorException;
@@ -19,6 +19,8 @@ use NimblePHP\Authorization\Exceptions\ValidationException;
 use NimblePHP\Authorization\Interfaces\TwoFactorProvider;
 use NimblePHP\Authorization\Interfaces\OAuthProvider;
 use NimblePHP\Authorization\Interfaces\TokenProvider;
+use NimblePHP\Authorization\OAuth\OAuthAccountRepository;
+use NimblePHP\Authorization\OAuth\OAuthIdentity;
 use NimblePHP\Authorization\Services\RecoveryCodeService;
 use NimblePHP\Authorization\Services\RememberMeService;
 use NimblePHP\Framework\Kernel;
@@ -1072,11 +1074,11 @@ class Authorization
      * @param string $code Authorization code from provider
      * @param string $providerName OAuth provider name
      * @param string $state State returned by the OAuth provider
-     * @return array User data from OAuth provider
+     * @return OAuthIdentity Immutable identity established by the verified callback
      * @throws InvalidArgumentException If the pending flow or state is invalid
      * @throws \Exception If token exchange fails
      */
-    public function handleOAuthCallback(string $code, string $providerName, string $state): array
+    public function handleOAuthCallback(string $code, string $providerName, string $state): OAuthIdentity
     {
         $flow = $this->consumeOAuthFlow($providerName, $state);
         $provider = $this->getOAuthProvider($providerName);
@@ -1085,7 +1087,7 @@ class Authorization
         $accessToken = $provider->exchangeCodeForToken($code, $redirectUri);
         $userData = $provider->getUserData($accessToken);
 
-        return array_merge($userData, ['provider' => $providerName]);
+        return OAuthIdentity::fromProviderCallback($providerName, $userData);
     }
 
     /**
@@ -1125,57 +1127,96 @@ class Authorization
     /**
      * Login user via OAuth provider
      *
-     * Creates account if user doesn't exist, or logs in existing user
-     * Supports account linking via email matching
+     * Creates an account if the composite provider/subject identity is unknown.
+     * An e-mail collision never links accounts automatically; use
+     * linkOAuthIdentity() from an authenticated, reauthenticated session.
      *
-     * @param array $oauthData User data from OAuth provider (must include: oauth_id, email, username, provider)
+     * @param OAuthIdentity $identity Result returned by handleOAuthCallback()
      * @param bool $createIfNotExists Create account if user doesn't exist (default: true)
      * @return bool True if login successful
      * @throws \Exception If user not found and createIfNotExists is false
      */
-    public function loginWithOAuth(array $oauthData, bool $createIfNotExists = true): bool
+    public function loginWithOAuth(OAuthIdentity $identity, bool $createIfNotExists = true): bool
     {
-        $tableName = Config::getTableName();
-        $oauthIdColumn = Config::getOAuthColumn('id');
-        $oauthProviderColumn = Config::getOAuthColumn('provider');
+        $repository = new OAuthAccountRepository();
+        $existingUser = $repository->findByIdentity($identity);
 
-        $accountTable = new Table($tableName);
-
-        $existingUser = $accountTable->findByField($oauthIdColumn, $oauthData['oauth_id']);
-
-        if (!$existingUser) {
-            $existingUser = $accountTable->findByField('email', $oauthData['email'] ?? '');
-        }
-
-        if (!$existingUser) {
+        if ($existingUser === null) {
             if (!$createIfNotExists) {
                 throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.user_account_creation_disabled'));
             }
 
-            $accountData = [
-                'username' => $oauthData['username'],
-                'email' => $oauthData['email'] ?? '',
-                $oauthIdColumn => $oauthData['oauth_id'],
-                $oauthProviderColumn => $oauthData['provider'],
-                'password' => password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT),
-                'active' => 1,
-                'created_at' => date('Y-m-d H:i:s')
-            ];
+            if (!$identity->emailVerified || $identity->email === '') {
+                throw new InvalidArgumentException('OAuth account creation requires a non-empty, provider-verified e-mail address');
+            }
 
-            $accountTable->insert($accountData);
-            $existingUser = $accountTable->findByField('email', $oauthData['email'] ?? '');
-        } else {
-            $userId = $existingUser[$tableName][Config::getColumn('id')];
-            $this->account->updateOAuthData($userId, $oauthData['oauth_id'], $oauthData['provider']);
+            if ($repository->findByEmail($identity->email) !== null) {
+                throw new OAuthAccountLinkRequiredException(
+                    'An account with this e-mail already exists; sign in and explicitly link the OAuth identity'
+                );
+            }
+
+            $existingUser = $repository->create($identity);
         }
 
-        if (!$existingUser) {
-            throw new \Exception(Translation::getInstance()->translate('module.authorization.errors.failed_create_user_account'));
-        }
-
-        $this->completeLogin((int)$existingUser[$tableName][Config::getColumn('id')], $existingUser, LoginSuccessEvent::METHOD_OAUTH);
+        $accountId = (int)$existingUser[Config::getColumn('id')];
+        $this->completeLogin(
+            $accountId,
+            [Config::$tableName => $existingUser],
+            LoginSuccessEvent::METHOD_OAUTH
+        );
 
         return true;
+    }
+
+    /**
+     * Explicitly link an OAuth identity to the authenticated account.
+     *
+     * This operation requires password reauthentication and refuses to replace
+     * an existing different OAuth identity or steal an identity from another account.
+     */
+    public function linkOAuthIdentity(OAuthIdentity $identity, string $currentPassword): bool
+    {
+        if (!$this->isAuthorized()) {
+            throw new InvalidArgumentException('Authentication is required to link an OAuth identity');
+        }
+
+        if ($currentPassword === '') {
+            throw new InvalidArgumentException('Current password is required to link an OAuth identity');
+        }
+
+        $repository = new OAuthAccountRepository();
+        $accountId = $this->getAuthorizedId();
+        $account = $repository->findById($accountId);
+
+        if ($account === null) {
+            throw new InvalidArgumentException('Authenticated account does not exist');
+        }
+
+        $passwordHash = $account[Config::getColumn('password')] ?? null;
+        if (!is_string($passwordHash) || !Config::getPasswordHasher()->verify($passwordHash, $currentPassword)) {
+            throw new InvalidArgumentException('Current password is invalid');
+        }
+
+        $identityOwner = $repository->findByIdentity($identity);
+        if ($identityOwner !== null && (int)$identityOwner[Config::getColumn('id')] !== $accountId) {
+            throw new InvalidArgumentException('OAuth identity is already linked to another account');
+        }
+
+        $currentProvider = $account[Config::getOAuthColumn('provider')] ?? null;
+        $currentSubject = $account[Config::getOAuthColumn('id')] ?? null;
+        $hasDifferentIdentity = ($currentProvider !== null || $currentSubject !== null)
+            && ($currentProvider !== $identity->provider || $currentSubject !== $identity->subject);
+
+        if ($hasDifferentIdentity) {
+            throw new InvalidArgumentException('Account already has a different OAuth identity');
+        }
+
+        if ($identityOwner !== null) {
+            return true;
+        }
+
+        return $repository->link($accountId, $identity);
     }
 
     /**

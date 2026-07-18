@@ -189,13 +189,14 @@ class OAuthController
             }
             
             // Obsłuż callback i pobierz dane użytkownika
-            $userData = $auth->handleOAuthCallback($code, 'github', $state);
+            $identity = $auth->handleOAuthCallback($code, 'github', $state);
             
             // Zaloguj użytkownika
             // Parametr createIfNotExists:
-            // - true (domyślnie): tworzy nowe konto jeśli email nie istnieje
+            // - true (domyślnie): tworzy nowe konto dla nieznanej pary
+            //   provider + subject, wyłącznie ze zweryfikowanym e-mailem
             // - false: loguje tylko istniejących użytkowników
-            if ($auth->loginWithOAuth($userData, createIfNotExists: true)) {
+            if ($auth->loginWithOAuth($identity, createIfNotExists: true)) {
                 // Logowanie powiodło się
                 header('Location: /dashboard');
                 exit;
@@ -210,21 +211,16 @@ class OAuthController
 }
 ```
 
-### 2. Dane otrzymane z GitHub
+### 2. Tożsamość otrzymana z GitHub
 
-Po pomyślnej autoryzacji otrzymasz:
+Po pomyślnej autoryzacji otrzymasz niemutowalny `OAuthIdentity`:
 
 ```php
-[
-    'oauth_id'       => '12345678',                              // GitHub user ID
-    'oauth_provider' => 'github',                                // Dostawca
-    'username'       => 'octocat',                               // GitHub login
-    'email'          => 'octocat@github.com',                    // Email użytkownika
-    'name'           => 'The Octocat',                           // Imię i nazwisko
-    'avatar'         => 'https://avatars.githubusercontent.com/u/1?v=4',  // Avatar URL
-    'profile_url'    => 'https://github.com/octocat',            // URL profilu GitHub
-    'provider'       => 'github'                                 // Dostawca (powtórzony)
-]
+$identity->provider;      // "github"
+$identity->subject;       // "12345678"
+$identity->username;      // "octocat"
+$identity->email;         // tylko adres primary + verified
+$identity->emailVerified; // true
 ```
 
 ## Niestandardowe providery OAuth2
@@ -306,6 +302,7 @@ class GoogleProvider implements OAuthProvider
             'oauth_provider' => 'google',
             'username' => $user['email'],
             'email' => $user['email'],
+            'email_verified' => (bool)$user['verified_email'],
             'name' => $user['name'],
             'avatar' => $user['picture'],
             'profile_url' => 'https://myaccount.google.com/',
@@ -384,11 +381,26 @@ Zawsze używaj HTTPS w produkcji:
 - Przechowuj w zmiennych środowiskowych
 - Nie commituj do Git'a
 
-### 2. Account Linking
+### 4. Tożsamość i jawne łączenie kont
 
-OAuth obsługuje łączenie kont poprzez matching e-maila:
-- Jeśli użytkownik z tym e-mailem już istnieje, jego konto jest aktualizowane
-- Zapewnia bezpieczeństwo przed duplikowaniem kont
+- Konto OAuth jest rozpoznawane po parze `(provider, subject)`, a migracja
+  `1784368700` dodaje na niej unikalny indeks.
+- E-mail nie jest kluczem tożsamości. Moduł nie aktualizuje ani nie przepina
+  istniejącego konta tylko dlatego, że provider zwrócił ten sam adres.
+- GitHubProvider akceptuje wyłącznie adres oznaczony jednocześnie jako
+  `primary` i `verified`. Brak takiego adresu blokuje automatyczne utworzenie
+  nowego konta.
+- Kolizja e-maila rzuca `OAuthAccountLinkRequiredException`. Użytkownik musi
+  najpierw zalogować się istniejącą metodą, ponownie podać hasło i dopiero
+  jawnie połączyć tożsamość:
+
+```php
+$identity = $auth->handleOAuthCallback($code, 'github', $state);
+$auth->linkOAuthIdentity($identity, $currentPassword);
+```
+
+`loginWithOAuth()` nie przyjmuje już tablic. Należy przekazać bez zmian obiekt
+`OAuthIdentity` zwrócony przez `handleOAuthCallback()`.
 
 ### 3. Rate Limiting
 
@@ -544,8 +556,8 @@ class AuthController
                 throw new \Exception('Brak kodu autoryzacyjnego lub state');
             }
 
-            $userData = $this->auth->handleOAuthCallback($code, 'github', $state);
-            $this->auth->loginWithOAuth($userData);
+            $identity = $this->auth->handleOAuthCallback($code, 'github', $state);
+            $this->auth->loginWithOAuth($identity);
 
             header('Location: /dashboard');
             exit;

@@ -36,6 +36,7 @@ AUTHORIZATION_COLUMN_USERNAME=username
 AUTHORIZATION_COLUMN_EMAIL=email
 AUTHORIZATION_COLUMN_PASSWORD=password
 AUTHORIZATION_COLUMN_ACTIVE=active
+AUTHORIZATION_COLUMN_CREATED_AT=date_created
 
 # Konfiguracja Rate Limiting (ochrona przed atakami brute-force)
 AUTHORIZATION_RATE_LIMIT_ENABLED=true
@@ -63,7 +64,8 @@ Config::$columns = [
     'username' => 'login',
     'email' => 'email_address',
     'password' => 'hashed_password',
-    'active' => 'is_active'
+    'active' => 'is_active',
+    'created_at' => 'created_on'
 ];
 ```
 
@@ -1246,6 +1248,7 @@ Biblioteka może rzucać następujące wyjątki:
 - `RateLimitExceededException` - gdy limit nieudanych prób logowania został przekroczony (HTTP 429)
 - `TwoFactorException` - gdy weryfikacja kodu 2FA nie powiodła się (kod nieprawidłowy lub wygasły)
 - `PendingTwoFactorException` - gdy użytkownik zalogował się, ale wymaga weryfikacji 2FA (zawiera ID użytkownika i dostawcę)
+- `OAuthAccountLinkRequiredException` - gdy zweryfikowany e-mail OAuth należy już do konta, które nie zostało jawnie połączone
 
 ## OAuth2 - Logowanie społeczne
 
@@ -1306,10 +1309,10 @@ try {
     }
     
     // State jest wymagany, ma krótki TTL i może zostać użyty tylko raz.
-    $userData = $auth->handleOAuthCallback($code, 'github', $state);
+    $identity = $auth->handleOAuthCallback($code, 'github', $state);
     
     // Logowanie użytkownika (tworzy konto jeśli nie istnieje)
-    if ($auth->loginWithOAuth($userData)) {
+    if ($auth->loginWithOAuth($identity)) {
         header('Location: /dashboard');
         exit;
     }
@@ -1318,21 +1321,18 @@ try {
 }
 ```
 
-### Dane otrzymane z OAuth2
+### Wynik zweryfikowanego callbacku
 
-Po pomyślnej autoryzacji otrzymujesz takie dane:
+`handleOAuthCallback()` zwraca niemutowalny `OAuthIdentity`, nie tablicę
+kontrolowaną przez wywołującego:
 
 **Dla GitHub OAuth2:**
 ```php
-[
-    'oauth_id' => '12345678',        // GitHub user ID
-    'oauth_provider' => 'github',     // Dostawca OAuth
-    'username' => 'octocat',          // GitHub login
-    'email' => 'octocat@github.com',  // Email użytkownika
-    'name' => 'The Octocat',          // Imię i nazwisko
-    'avatar' => 'https://...',        // Avatar URL
-    'profile_url' => 'https://...'    // URL profilu GitHub
-]
+$identity->provider;      // "github"
+$identity->subject;       // "12345678" — stabilny identyfikator GitHub
+$identity->username;      // "octocat"
+$identity->email;         // wyłącznie primary + verified
+$identity->emailVerified; // true, gdy provider potwierdził adres
 ```
 
 ### Tworzenie niestandardowego providera OAuth2
@@ -1382,7 +1382,15 @@ class GoogleProvider implements OAuthProvider
     
     public function getUserData(string $accessToken): array
     {
-        // Implementacja pobierania danych użytkownika
+        // Provider musi zwrócić stabilny subject oraz informację o tym,
+        // czy e-mail został faktycznie zweryfikowany przez providera.
+        return [
+            'oauth_id' => $subject,
+            'oauth_provider' => 'google',
+            'username' => $username,
+            'email' => $email,
+            'email_verified' => $emailVerified,
+        ];
     }
     
     public function getName(): string
@@ -1418,12 +1426,26 @@ $googleProvider = new \MyApp\OAuth\GoogleProvider('CLIENT_ID', 'CLIENT_SECRET');
 - TTL ustawia `AUTHORIZATION_OAUTH_STATE_LIFETIME` (domyślnie 600 sekund),
   a klucz sesji `AUTHORIZATION_OAUTH_FLOW_SESSION_KEY` (domyślnie `oauth_flow`)
 - Dane OAuth są przechowywane w kolumnach `account_oauth_id` i `account_oauth_provider`
-- Logowanie OAuth obsługuje matching e-maila - jeśli użytkownik z tym e-mailem już istnieje, jego konto jest połączone
+- Tożsamość jest wyszukiwana wyłącznie po unikalnej parze `(provider, subject)`;
+  migracja `1784368700` wymusza tę unikalność w bazie
+- Moduł nigdy nie łączy kont automatycznie po e-mailu. Kolizja kończy się
+  `OAuthAccountLinkRequiredException` bez zmiany istniejącego konta
+- Nowe konto może powstać tylko z niepustym e-mailem oznaczonym przez providera
+  jako zweryfikowany. GitHub używa wyłącznie adresu `primary && verified`
+- Jawne połączenie wymaga zalogowanej sesji i ponownego podania hasła:
+
+```php
+$identity = $auth->handleOAuthCallback($code, 'github', $state);
+$auth->linkOAuthIdentity($identity, $currentPassword);
+```
+
+- `loginWithOAuth()` przyjmuje tylko `OAuthIdentity` zwrócone przez callback;
+  przekazanie dawnej tablicy kończy się `TypeError`
 - Można wymusić tworzenie nowych kont poprzez parametr `createIfNotExists`
 
 ```php
 // Logowanie bez tworzenia konta jeśli użytkownik nie istnieje
-$auth->loginWithOAuth($userData, createIfNotExists: false);
+$auth->loginWithOAuth($identity, createIfNotExists: false);
 ```
 
 ## Token-Based Authentication

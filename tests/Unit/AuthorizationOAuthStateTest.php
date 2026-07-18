@@ -8,6 +8,7 @@ use InvalidArgumentException;
 use NimblePHP\Authorization\Authorization;
 use NimblePHP\Authorization\Config;
 use NimblePHP\Authorization\Interfaces\OAuthProvider;
+use NimblePHP\Authorization\OAuth\OAuthIdentity;
 use NimblePHP\Framework\Kernel;
 use NimblePHP\Framework\Session;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -172,7 +173,10 @@ final class AuthorizationOAuthStateTest extends TestCase
             $state
         );
 
-        self::assertSame('oauth-subject', $userData['oauth_id']);
+        self::assertInstanceOf(OAuthIdentity::class, $userData);
+        self::assertSame('oauth-subject', $userData->subject);
+        self::assertSame('github_valid_state', $userData->provider);
+        self::assertTrue($userData->emailVerified);
         self::assertSame($redirectUri, $provider->lastRedirectUri);
         self::assertArrayNotHasKey('oauth_flow', $_SESSION);
         self::assertSame(1, $provider->exchangeCalls);
@@ -250,6 +254,7 @@ final class RecordingOAuthProvider implements OAuthProvider
             'oauth_provider' => $this->name,
             'username' => 'oauth-user',
             'email' => 'oauth@example.test',
+            'email_verified' => true,
         ];
     }
 

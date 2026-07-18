@@ -4,6 +4,7 @@ namespace NimblePHP\Authorization\Providers;
 
 use InvalidArgumentException;
 use NimblePHP\Authorization\Interfaces\OAuthProvider;
+use NimblePHP\Authorization\OAuth\GitHubIdentityNormalizer;
 
 /**
  * GitHub OAuth2 provider
@@ -104,27 +105,9 @@ class GitHubProvider implements OAuthProvider
     {
         $user = $this->makeAuthenticatedRequest('GET', self::USER_API_URL, $accessToken);
 
-        $result = [
-            'oauth_id' => (string)$user['id'],
-            'oauth_provider' => $this->name,
-            'username' => $user['login'] ?? '',
-            'email' => $user['email'] ?? '',
-            'name' => $user['name'] ?? $user['login'] ?? '',
-            'avatar' => $user['avatar_url'] ?? '',
-            'profile_url' => $user['html_url'] ?? '',
-        ];
-
-        if (empty($result['email'])) {
-            $emails = $this->getEmails($accessToken);
-            foreach ($emails as $emailData) {
-                if ($emailData['primary']) {
-                    $result['email'] = $emailData['email'];
-                    break;
-                }
-            }
-        }
-
-        return $result;
+        // The public profile e-mail is not sufficient proof of ownership.
+        // Only a primary address explicitly marked verified by GitHub is used.
+        return (new GitHubIdentityNormalizer())->normalize($user, $this->getEmails($accessToken));
     }
 
     /**
