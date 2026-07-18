@@ -94,9 +94,16 @@ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJpYXQiOjE3MDAwMDAwMDAsImV
 
 - **Header**: `{"alg":"HS256","typ":"JWT"}`
 - **Payload**: `{"user_id":1,"iat":1700000000,"exp":1700003600}`
+- **Stan konta**: payload zawiera także zastrzeżony `auth_epoch`, nadawany
+  przez `Authorization::generateToken()`
 - **Signature**: HMAC-SHA256(header.payload, secret)
 
 ### Walidacja tokenów JWT
+
+Używaj `Authorization::validateToken()`, a nie bezpośrednio
+`JWTProvider::validateToken()`. Warstwa Authorization pobiera konto i odrzuca
+token, gdy konto zostało usunięte, ma `active = 0` albo jego `auth_epoch`
+zmieniło się od chwili wydania tokenu.
 
 #### W middleware'ach API
 
@@ -227,6 +234,9 @@ Migracja dodaje 3 tabele:
 - `account_api_key_usage` - loguje użycie kluczy
 - `account_token_blacklist` - czarna lista tokenów
 
+Migracja `1784369500` dodaje również `auth_epoch` do tabeli kont i
+`account_api_keys`. Przy własnym schemacie obie kolumny są obowiązkowe.
+
 ```php
 // Uruchom migracje
 php artisan migrate
@@ -282,6 +292,28 @@ sk_abcdef1234567890abcdef1234567890abcdef123456789012345678
 Prefiks `sk_` oznacza "secret key".
 
 ### Zarządzanie API Keys
+
+Klucz zapisuje `auth_epoch` konta z chwili wydania. Zmiana hasła lub
+`Account::deactivate()` zwiększa epokę i dezaktywuje wszystkie API keys konta.
+Dlatego stary klucz nie odzyskuje ważności po ponownej aktywacji użytkownika.
+
+## Stan konta i unieważnianie poświadczeń
+
+`active` jest egzekwowane zawsze; `AUTHORIZATION_REQUIRE_ACTIVATION` wpływa
+tylko na wartość nadaną przy rejestracji. Sesja przechowuje ID konta oraz
+epokę w `account_auth_epoch`. Przy każdym `isAuthorized()` rekord musi nadal
+istnieć, być aktywny i mieć tę samą epokę.
+
+Zmiana hasła i dezaktywacja:
+
+1. zwiększają `auth_epoch`;
+2. unieważniają sesje i JWT logicznie przy następnym użyciu;
+3. usuwają remember-me;
+4. fizycznie dezaktywują wbudowane API keys.
+
+Niestandardowy provider tokenów powinien zwrócić `auth_epoch` z claims w
+wyniku `validateToken()`. Jeżeli przechowuje własne trwałe rekordy, może
+zaimplementować `AccountTokenRevoker::revokeAllForAccount()`.
 
 #### Lista kluczy użytkownika
 
@@ -601,4 +633,3 @@ try {
     echo json_encode(['error' => 'Invalid token']);
 }
 ```
-

@@ -22,6 +22,7 @@ use NimblePHP\Authorization\Interfaces\TokenProvider;
 use NimblePHP\Authorization\OAuth\OAuthAccountRepository;
 use NimblePHP\Authorization\OAuth\OAuthIdentity;
 use NimblePHP\Authorization\Services\RecoveryCodeService;
+use NimblePHP\Authorization\Services\AccountStateService;
 use NimblePHP\Authorization\Services\RememberMeService;
 use NimblePHP\Framework\Kernel;
 use NimblePHP\Framework\Session;
@@ -81,7 +82,36 @@ class Authorization
      */
     public function isAuthorized(): bool
     {
-        return $this->session->exists(Config::$sessionKey) && is_int($this->session->get(Config::$sessionKey));
+        if (
+            !$this->session->exists(Config::$sessionKey)
+            || !is_int($this->session->get(Config::$sessionKey))
+        ) {
+            return false;
+        }
+
+        $accountId = (int)$this->session->get(Config::$sessionKey);
+        $sessionEpoch = $this->session->get(Config::$authEpochSessionKey);
+
+        try {
+            $state = new AccountStateService();
+            $account = $state->findActive($accountId);
+
+            if (
+                $account === null
+                || !is_int($sessionEpoch)
+                || $sessionEpoch !== $state->epoch($account)
+            ) {
+                $this->clearAuthenticationState();
+                return false;
+            }
+        } catch (\Throwable) {
+            // Account state is a security boundary: database/schema failures
+            // must fail closed instead of trusting a stale session value.
+            $this->clearAuthenticationState();
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -235,7 +265,7 @@ class Authorization
             throw new ValidationException(Translation::getInstance()->translate('module.authorization.validation.invalid_credentials'));
         }
 
-        if (Config::isActivationRequired() && empty($account[Config::$tableName][Config::getColumn('active')])) {
+        if (empty($account[Config::$tableName][Config::getColumn('active')])) {
             // Record failed attempt for inactive account
             if (Config::isRateLimitEnabled()) {
                 $this->rateLimiter->recordFailedAttempt($login);
@@ -361,7 +391,7 @@ class Authorization
             return false;
         }
 
-        if (Config::isActivationRequired() && empty($account[Config::$tableName][Config::getColumn('active')])) {
+        if (empty($account[Config::$tableName][Config::getColumn('active')])) {
             return false;
         }
 
@@ -415,7 +445,7 @@ class Authorization
             return false;
         }
 
-        if (Config::isActivationRequired() && empty($account[Config::$tableName][Config::getColumn('active')])) {
+        if (empty($account[Config::$tableName][Config::getColumn('active')])) {
             $rememberMe->invalidateAll($accountId);
             $rememberMe->forget();
 
@@ -436,6 +466,14 @@ class Authorization
      */
     private function completeLogin(int $accountId, array $account, string $method): void
     {
+        $state = new AccountStateService();
+        $activeAccount = $state->findActive($accountId);
+
+        if ($activeAccount === null) {
+            $this->clearAuthenticationState();
+            throw new InvalidArgumentException('Account is inactive or does not exist');
+        }
+
         $currentId = $this->session->exists(Config::$sessionKey)
             ? (int)$this->session->get(Config::$sessionKey)
             : null;
@@ -445,7 +483,23 @@ class Authorization
         }
 
         $this->session->set(Config::$sessionKey, $accountId);
-        Kernel::dispatchEvent(new LoginSuccessEvent($accountId, $account, $method));
+        $this->session->set(Config::$authEpochSessionKey, $state->epoch($activeAccount));
+        Kernel::dispatchEvent(new LoginSuccessEvent(
+            $accountId,
+            $account !== [] ? $account : [Config::$tableName => $activeAccount],
+            $method
+        ));
+    }
+
+    /** Remove every server-side pending/authenticated marker from this session. */
+    private function clearAuthenticationState(): void
+    {
+        $this->session->remove(Config::$sessionKey);
+        $this->session->remove(Config::$authEpochSessionKey);
+        $this->session->remove(Config::$twoFactorSessionKey);
+        $this->session->remove(Config::$twoFactorProviderSessionKey);
+        $this->session->remove(Config::$challengeSessionKey);
+        $this->session->remove(Config::$challengeNameSessionKey);
     }
 
     /**
@@ -519,6 +573,7 @@ class Authorization
         $accountId = $this->isAuthorized() ? $this->getAuthorizedId() : null;
 
         $this->session->remove(Config::$sessionKey);
+        $this->session->remove(Config::$authEpochSessionKey);
         $this->session->remove(Config::$twoFactorSessionKey);
         $this->session->remove(Config::$twoFactorProviderSessionKey);
         $this->abortChallenge();
@@ -1243,6 +1298,15 @@ class Authorization
      */
     public function generateToken(int $userId, string $tokenType, array $claims = [], ?int $expiresIn = null): string
     {
+        $state = new AccountStateService();
+        $account = $state->findActive($userId);
+
+        if ($account === null) {
+            throw new InvalidArgumentException('Cannot generate a token for an inactive or missing account');
+        }
+
+        // Credential epoch is a reserved security value owned by Authorization.
+        $claims['auth_epoch'] = $state->epoch($account);
         $provider = $this->getTokenProvider($tokenType);
         return $provider->generateToken($userId, $claims, $expiresIn);
     }
@@ -1258,7 +1322,28 @@ class Authorization
     public function validateToken(string $token, string $tokenType): array
     {
         $provider = $this->getTokenProvider($tokenType);
-        return $provider->validateToken($token);
+        $tokenData = $provider->validateToken($token);
+        $accountId = $tokenData['user_id'] ?? null;
+        $tokenEpoch = $tokenData['auth_epoch'] ?? null;
+
+        if (
+            (!is_int($accountId) && !(is_string($accountId) && ctype_digit($accountId)))
+            || (
+                (!is_int($tokenEpoch) || $tokenEpoch < 0)
+                && !(is_string($tokenEpoch) && ctype_digit($tokenEpoch))
+            )
+        ) {
+            throw new InvalidArgumentException('Token account state is missing or invalid');
+        }
+
+        $state = new AccountStateService();
+        $account = $state->findActive((int)$accountId);
+
+        if ($account === null || $state->epoch($account) !== (int)$tokenEpoch) {
+            throw new InvalidArgumentException('Token was invalidated by an account state change');
+        }
+
+        return $tokenData;
     }
 
     /**

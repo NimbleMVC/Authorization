@@ -41,7 +41,8 @@ final class AuthorizationOAuthIdentityTest extends TestCase
         Config::$columns = [
             'id' => 'user_id', 'username' => 'login_name',
             'email' => 'mail_address', 'password' => 'secret_hash',
-            'active' => 'is_active', 'created_at' => 'created_on',
+            'active' => 'is_active', 'auth_epoch' => 'auth_epoch',
+            'created_at' => 'created_on',
         ];
         Config::$oauthColumns = ['id' => 'external_subject', 'provider' => 'provider_name'];
         Config::$sessionKey = 'account_id';
@@ -54,6 +55,7 @@ final class AuthorizationOAuthIdentityTest extends TestCase
                 mail_address TEXT NOT NULL UNIQUE,
                 secret_hash TEXT NOT NULL,
                 is_active INTEGER NOT NULL,
+                auth_epoch INTEGER NOT NULL DEFAULT 0,
                 created_on TEXT NOT NULL,
                 external_subject TEXT NULL,
                 provider_name TEXT NULL,
@@ -73,6 +75,7 @@ final class AuthorizationOAuthIdentityTest extends TestCase
         Config::$columns = [
             'id' => 'id', 'username' => 'username', 'email' => 'email',
             'password' => 'password', 'active' => 'active', 'created_at' => 'date_created',
+            'auth_epoch' => 'auth_epoch',
         ];
         Config::$oauthColumns = ['id' => 'account_oauth_id', 'provider' => 'account_oauth_provider'];
         Config::$sessionKey = 'account_id';
@@ -156,6 +159,7 @@ final class AuthorizationOAuthIdentityTest extends TestCase
     {
         $this->insertAccount('victim', 'victim@example.test');
         $_SESSION['account_id'] = 1;
+        $_SESSION['account_auth_epoch'] = 0;
 
         self::assertTrue($this->authorization->linkOAuthIdentity(
             new OAuthIdentity(
@@ -173,6 +177,7 @@ final class AuthorizationOAuthIdentityTest extends TestCase
     {
         $this->insertAccount('victim', 'victim@example.test');
         $_SESSION['account_id'] = 1;
+        $_SESSION['account_auth_epoch'] = 0;
 
         $this->expectException(InvalidArgumentException::class);
 

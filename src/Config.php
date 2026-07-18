@@ -58,6 +58,9 @@ class Config
      */
     public static string $sessionKey = 'account_id';
 
+    /** Session key containing the credential epoch captured at login. */
+    public static string $authEpochSessionKey = 'account_auth_epoch';
+
     /**
      * Require account activation before login
      * @var bool
@@ -324,6 +327,7 @@ class Config
         'email' => 'email',
         'password' => 'password',
         'active' => 'active',
+        'auth_epoch' => 'auth_epoch',
         'created_at' => 'date_created',
     ];
 
@@ -335,6 +339,7 @@ class Config
         self::$authType = $_ENV['AUTHORIZATION_TYPE'] ?? 'username';
         self::$tableName = $_ENV['AUTHORIZATION_TABLE'] ?? 'accounts';
         self::$sessionKey = $_ENV['AUTHORIZATION_SESSION_KEY'] ?? 'account_id';
+        self::$authEpochSessionKey = $_ENV['AUTHORIZATION_AUTH_EPOCH_SESSION_KEY'] ?? 'account_auth_epoch';
         self::$requireActivation = filter_var($_ENV['AUTHORIZATION_REQUIRE_ACTIVATION'] ?? false, FILTER_VALIDATE_BOOLEAN);
         self::$requireAuthByDefault = filter_var($_ENV['AUTHORIZATION_REQUIRE_AUTH_BY_DEFAULT'] ?? false, FILTER_VALIDATE_BOOLEAN);
         self::$rateLimitEnabled = filter_var($_ENV['AUTHORIZATION_RATE_LIMIT_ENABLED'] ?? true, FILTER_VALIDATE_BOOLEAN);
@@ -345,6 +350,7 @@ class Config
         self::$columns['email'] = $_ENV['AUTHORIZATION_COLUMN_EMAIL'] ?? 'email';
         self::$columns['password'] = $_ENV['AUTHORIZATION_COLUMN_PASSWORD'] ?? 'password';
         self::$columns['active'] = $_ENV['AUTHORIZATION_COLUMN_ACTIVE'] ?? 'active';
+        self::$columns['auth_epoch'] = $_ENV['AUTHORIZATION_COLUMN_AUTH_EPOCH'] ?? 'auth_epoch';
         self::$columns['created_at'] = $_ENV['AUTHORIZATION_COLUMN_CREATED_AT'] ?? 'date_created';
         self::$middlewarePriority = $_ENV['AUTHORIZATION_MIDDLEWARE_PRIORITY'] ?? 255;
         self::$manageSchema = filter_var($_ENV['AUTHORIZATION_MANAGE_SCHEMA'] ?? true, FILTER_VALIDATE_BOOLEAN);

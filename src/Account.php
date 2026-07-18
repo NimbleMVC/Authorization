@@ -11,6 +11,9 @@ use NimblePHP\Authorization\Events\BeforePasswordChangeEvent;
 use NimblePHP\Authorization\Events\PasswordChangedEvent;
 use NimblePHP\Authorization\Events\RoleRemovedEvent;
 use NimblePHP\Authorization\Exceptions\ValidationException;
+use NimblePHP\Authorization\Interfaces\AccountTokenRevoker;
+use NimblePHP\Authorization\Providers\APIKeyProvider;
+use NimblePHP\Authorization\Services\AccountStateService;
 use NimblePHP\Authorization\Services\RememberMeService;
 use NimblePHP\Framework\Kernel;
 
@@ -204,9 +207,9 @@ class Account
         $hashedPassword = $passwordHasher->hash($password);
         $result = $this->update([Config::getColumn('password') => $hashedPassword]);
 
-        // Stolen remember-me tokens must not survive a password change
-        if ($result && Config::$rememberMeEnabled && !empty($this->id)) {
-            (new RememberMeService())->invalidateAll((int)$this->id);
+        // Password changes invalidate every older session/token generation.
+        if ($result && !empty($this->id)) {
+            $this->invalidatePersistentCredentials((int)$this->id, incrementEpoch: true);
         }
 
         if ($result && $dispatchEvents && !empty($this->id)) {
@@ -224,10 +227,6 @@ class Account
      */
     public function isActive(?int $accountId = null): bool
     {
-        if (!Config::isActivationRequired()) {
-            return true;
-        }
-
         $id = $accountId ?? $this->id;
 
         if (!$id) {
@@ -240,7 +239,7 @@ class Account
             return false;
         }
 
-        return !empty($account[Config::getColumn('active')]);
+        return !empty($account[Config::$tableName][Config::getColumn('active')]);
     }
 
     /**
@@ -286,19 +285,44 @@ class Account
             return false;
         }
 
-        $originalId = $this->id;
-        $this->setId($id);
-        $result = $this->update([Config::getColumn('active') => 0]);
-
-        if ($originalId) {
-            $this->setId($originalId);
-        }
+        $result = (new AccountStateService())->deactivate((int)$id);
 
         if ($result) {
+            $this->invalidatePersistentCredentials((int)$id, incrementEpoch: false);
             Kernel::dispatchEvent(new AccountDeactivatedEvent((int)$id));
         }
 
         return $result;
+    }
+
+    /**
+     * Revoke persistent credentials and optionally advance the account epoch.
+     *
+     * Session invalidation is lazy but immediate at the next request because
+     * Authorization::isAuthorized() compares its captured epoch with the row.
+     */
+    private function invalidatePersistentCredentials(int $accountId, bool $incrementEpoch): void
+    {
+        if ($incrementEpoch && !(new AccountStateService())->incrementEpoch($accountId)) {
+            throw new DatabaseManagerException('Failed to increment account credential epoch');
+        }
+
+        $rememberTable = new Table(Config::$rememberMeTableName);
+        if ($rememberTable->exists()) {
+            (new RememberMeService())->invalidateAll($accountId);
+        }
+
+        // Built-in API keys are persistent even when the provider was not
+        // registered in this particular request (e.g. an admin deactivation).
+        if ((new Table('account_api_keys'))->exists()) {
+            (new APIKeyProvider())->revokeAllForAccount($accountId);
+        }
+
+        foreach (Config::getTokenProviders() as $provider) {
+            if ($provider instanceof AccountTokenRevoker && !($provider instanceof APIKeyProvider)) {
+                $provider->revokeAllForAccount($accountId);
+            }
+        }
     }
 
     /**
