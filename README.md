@@ -36,7 +36,9 @@ AUTHORIZATION_COLUMN_USERNAME=username
 AUTHORIZATION_COLUMN_EMAIL=email
 AUTHORIZATION_COLUMN_PASSWORD=password
 AUTHORIZATION_COLUMN_ACTIVE=active
+AUTHORIZATION_COLUMN_AUTH_EPOCH=auth_epoch
 AUTHORIZATION_COLUMN_CREATED_AT=date_created
+AUTHORIZATION_AUTH_EPOCH_SESSION_KEY=account_auth_epoch
 
 # Konfiguracja Rate Limiting (ochrona przed atakami brute-force)
 AUTHORIZATION_RATE_LIMIT_ENABLED=true
@@ -65,6 +67,7 @@ Config::$columns = [
     'email' => 'email_address',
     'password' => 'hashed_password',
     'active' => 'is_active',
+    'auth_epoch' => 'credential_version',
     'created_at' => 'created_on'
 ];
 ```
@@ -905,9 +908,12 @@ $userId = $account->getId();
 $account->setId(123);
 ```
 
-### Aktywacja kont
+### Aktywacja, dezaktywacja i unieważnianie dostępu
 
-Biblioteka obsługuje opcjonalną aktywację kont użytkowników. Gdy aktywacja jest włączona, nowo zarejestrowani użytkownicy nie mogą się zalogować dopóki ich konta nie zostaną aktywowane.
+Biblioteka obsługuje opcjonalną aktywację nowych kont oraz bezwarunkową
+kontrolę ich bieżącego stanu. `AUTHORIZATION_REQUIRE_ACTIVATION` decyduje
+wyłącznie, czy rejestracja zapisze początkowo `active = 0`. Wartość `active`
+jest sprawdzana zawsze — również gdy wymaganie aktywacji jest wyłączone.
 
 #### Konfiguracja aktywacji
 
@@ -982,7 +988,8 @@ $account->activate();
 
 #### Logowanie z aktywacją
 
-Gdy aktywacja jest włączona, tylko aktywne konta mogą się zalogować:
+Tylko aktywne konta mogą się zalogować, niezależnie od konfiguracji procesu
+aktywacji:
 
 ```php
 use NimblePHP\Authorization\Authorization;
@@ -999,9 +1006,10 @@ if (!$loginResult) {
 }
 ```
 
-#### Wyłączenie aktywacji
+#### Wyłączenie procesu aktywacji
 
-Gdy aktywacja jest wyłączona, wszystkie konta są automatycznie traktowane jako aktywne:
+Gdy aktywacja jest wyłączona, nowe konta otrzymują `active = 1`. Nie powoduje
+to ignorowania późniejszej dezaktywacji:
 
 ```php
 use NimblePHP\Authorization\Config;
@@ -1009,9 +1017,30 @@ use NimblePHP\Authorization\Config;
 // Wyłączenie aktywacji (domyślnie)
 Config::$requireActivation = false;
 
-// Wszystkie nowe konta będą miały active = 1
-// Metoda isActive() zawsze zwróci true
+// Wszystkie nowe konta będą miały active = 1.
+// Konto ustawione później na active = 0 nadal nie uzyska dostępu.
 ```
+
+#### `auth_epoch` — wersja sesji i poświadczeń
+
+Migracja `1784369500` dodaje do kont oraz kluczy API licznik `auth_epoch`.
+Każde logowanie zapisuje bieżącą wartość w sesji, a JWT i API key otrzymują ją
+w danych tokenu. `isAuthorized()`, `validateToken()` i wszystkie ścieżki
+logowania wymagają jednocześnie:
+
+- istniejącego rekordu konta;
+- `active = 1`;
+- zgodnego `auth_epoch`.
+
+`Account::deactivate()` atomowo ustawia `active = 0` i zwiększa epokę, usuwa
+remember-me oraz dezaktywuje wszystkie wbudowane API keys. Zmiana hasła także
+zwiększa epokę i unieważnia te poświadczenia. Pozostałe sesje i JWT przestają
+działać przy najbliższej próbie użycia, nawet po późniejszej reaktywacji konta.
+Usunięte konto również nie może utrzymać ani odtworzyć sesji.
+
+Przy własnym providerze trwałych tokenów można obsłużyć fizyczne wycofanie
+poświadczeń przez `AccountTokenRevoker`; niezależnie od tego provider musi
+przenosić `auth_epoch` zwrócone w `claims` do wyniku `validateToken()`.
 
 ### Praca z RBAC
 
@@ -1452,6 +1481,11 @@ $auth->loginWithOAuth($identity, createIfNotExists: false);
 
 Biblioteka wspiera nowoczesne metody autoryzacji API oparte na tokenach.
 
+Tokeny należy generować i walidować przez `Authorization`, nie przez bezpośrednie
+wywołanie providera. Warstwa ta sprawdza istnienie i aktywność konta oraz wiąże
+token z bieżącym `auth_epoch`. Token bez epoki albo wydany przed zmianą hasła
+lub dezaktywacją jest odrzucany.
+
 ### JWT (JSON Web Tokens)
 
 RFC 7519 standard dla stateless, bezpiecznych tokenów.
@@ -1505,6 +1539,9 @@ try {
 }
 ```
 
+JWT zawiera zastrzeżony claim `auth_epoch`; wartość przekazana przez aplikację
+w tablicy dodatkowych claims jest nadpisywana stanem konta.
+
 ### API Keys
 
 Stacjonarne klucze API z loggingiem i rate limitingiem.
@@ -1553,6 +1590,10 @@ try {
     http_response_code(401);
 }
 ```
+
+Wiersz API key przechowuje epokę z chwili wydania. Dezaktywacja konta i zmiana
+hasła ustawiają wszystkie jego klucze jako nieaktywne; dodatkowo centralna
+walidacja odrzuca każdą niezgodność epoki.
 
 #### Zarządzanie kluczami
 

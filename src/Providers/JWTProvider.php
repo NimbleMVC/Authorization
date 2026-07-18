@@ -4,6 +4,7 @@ namespace NimblePHP\Authorization\Providers;
 
 use NimblePHP\Authorization\Interfaces\TokenProvider;
 use krzysztofzylka\DatabaseManager\Table;
+use krzysztofzylka\DatabaseManager\DatabaseManager;
 use NimblePHP\Authorization\Config;
 use NimblePHP\Framework\Translation\Translation;
 
@@ -179,10 +180,15 @@ class JWTProvider implements TokenProvider
                 return false;
             }
 
-            $blacklistedToken = $this->tokenBlacklist->findByField('token_jti', $payload['jti']);
-            return $blacklistedToken !== null;
-        } catch (\Exception $e) {
-            return false;
+            $statement = DatabaseManager::$connection->getConnection()->prepare(
+                'SELECT 1 FROM account_token_blacklist WHERE token_jti = :jti LIMIT 1'
+            );
+            $statement->execute(['jti' => $payload['jti']]);
+
+            return $statement->fetchColumn() !== false;
+        } catch (\Throwable) {
+            // Revocation storage failures must not turn into token acceptance.
+            return true;
         }
     }
 

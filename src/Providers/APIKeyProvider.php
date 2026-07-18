@@ -3,7 +3,9 @@
 namespace NimblePHP\Authorization\Providers;
 
 use NimblePHP\Authorization\Interfaces\TokenProvider;
+use NimblePHP\Authorization\Interfaces\AccountTokenRevoker;
 use krzysztofzylka\DatabaseManager\Table;
+use krzysztofzylka\DatabaseManager\DatabaseManager;
 use NimblePHP\Authorization\Config;
 use NimblePHP\Framework\Translation\Translation;
 
@@ -16,7 +18,7 @@ use NimblePHP\Framework\Translation\Translation;
  * - Scopes for permission control
  * - Expiration and revocation support
  */
-class APIKeyProvider implements TokenProvider
+class APIKeyProvider implements TokenProvider, AccountTokenRevoker
 {
     private Table $keysTable;
     private Table $keyUsageTable;
@@ -54,6 +56,7 @@ class APIKeyProvider implements TokenProvider
             'key_name' => $claims['name'] ?? 'API Key',
             'scopes' => isset($claims['scopes']) ? json_encode($claims['scopes']) : null,
             'rate_limit' => $claims['rate_limit'] ?? 1000, // requests per hour
+            'auth_epoch' => $claims['auth_epoch'] ?? 0,
             'expires_at' => $expiresAt,
             'created_at' => date('Y-m-d H:i:s'),
             'last_used_at' => null,
@@ -111,7 +114,23 @@ class APIKeyProvider implements TokenProvider
             'key_name' => $keyRecord['key_name'],
             'scopes' => $keyRecord['scopes'] ? json_decode($keyRecord['scopes'], true) : [],
             'rate_limit' => $keyRecord['rate_limit'],
+            'auth_epoch' => $keyRecord['auth_epoch'],
         ];
+    }
+
+    /** Revoke every API key issued to an account. */
+    public function revokeAllForAccount(int $accountId): bool
+    {
+        $statement = DatabaseManager::$connection->getConnection()->prepare(
+            'UPDATE account_api_keys'
+            . ' SET is_active = 0, revoked_at = :revoked_at'
+            . ' WHERE user_id = :account_id AND is_active = 1'
+        );
+
+        return $statement->execute([
+            'revoked_at' => date('Y-m-d H:i:s'),
+            'account_id' => $accountId,
+        ]);
     }
 
     /**

@@ -402,6 +402,10 @@ $auth->linkOAuthIdentity($identity, $currentPassword);
 `loginWithOAuth()` nie przyjmuje już tablic. Należy przekazać bez zmian obiekt
 `OAuthIdentity` zwrócony przez `handleOAuthCallback()`.
 
+Nawet poprawna para `(provider, subject)` nie zaloguje konta usuniętego lub z
+`active = 0`. Kontrola jest niezależna od `AUTHORIZATION_REQUIRE_ACTIVATION` i
+jest ponawiana centralnie przed utworzeniem sesji.
+
 ### 3. Rate Limiting
 
 Rate limiting biblioteki chroni przed atakami brute-force:
