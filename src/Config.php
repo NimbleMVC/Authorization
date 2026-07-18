@@ -323,7 +323,8 @@ class Config
         'username' => 'username',
         'email' => 'email',
         'password' => 'password',
-        'active' => 'active'
+        'active' => 'active',
+        'created_at' => 'date_created',
     ];
 
     /**
@@ -344,6 +345,7 @@ class Config
         self::$columns['email'] = $_ENV['AUTHORIZATION_COLUMN_EMAIL'] ?? 'email';
         self::$columns['password'] = $_ENV['AUTHORIZATION_COLUMN_PASSWORD'] ?? 'password';
         self::$columns['active'] = $_ENV['AUTHORIZATION_COLUMN_ACTIVE'] ?? 'active';
+        self::$columns['created_at'] = $_ENV['AUTHORIZATION_COLUMN_CREATED_AT'] ?? 'date_created';
         self::$middlewarePriority = $_ENV['AUTHORIZATION_MIDDLEWARE_PRIORITY'] ?? 255;
         self::$manageSchema = filter_var($_ENV['AUTHORIZATION_MANAGE_SCHEMA'] ?? true, FILTER_VALIDATE_BOOLEAN);
         self::$regenerateSessionOnLogin = filter_var($_ENV['AUTHORIZATION_SESSION_REGENERATE'] ?? true, FILTER_VALIDATE_BOOLEAN);
