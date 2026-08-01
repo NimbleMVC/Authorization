@@ -23,6 +23,7 @@ use NimblePHP\Authorization\OAuth\OAuthAccountRepository;
 use NimblePHP\Authorization\OAuth\OAuthIdentity;
 use NimblePHP\Authorization\Services\RecoveryCodeService;
 use NimblePHP\Authorization\Services\AccountStateService;
+use NimblePHP\Authorization\Services\PrivilegedOperationGate;
 use NimblePHP\Authorization\Services\RememberMeService;
 use NimblePHP\Framework\Kernel;
 use NimblePHP\Framework\Session;
@@ -343,10 +344,11 @@ class Authorization
 
     /**
      * Complete a pending login challenge (call after the challenge module verified the user)
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool True when a pending challenge existed and the user was logged in
      * @throws DatabaseManagerException
      */
-    public function completeChallenge(): bool
+    public function completeChallenge(?object $evidence = null): bool
     {
         $pending = $this->getPendingChallenge();
 
@@ -354,12 +356,23 @@ class Authorization
             return false;
         }
 
-        $account = $this->account->find([Config::getColumn('id') => $pending['accountId']]) ?? [];
-        $this->completeLogin($pending['accountId'], $account, $pending['challenge']);
-        $this->session->remove(Config::$challengeSessionKey);
-        $this->session->remove(Config::$challengeNameSessionKey);
+        return PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::COMPLETE_CHALLENGE,
+                $this->currentActorId(),
+                $pending['accountId'],
+                ['challenge' => $pending['challenge']],
+                $evidence
+            ),
+            function () use ($pending): bool {
+                $account = $this->account->find([Config::getColumn('id') => $pending['accountId']]) ?? [];
+                $this->completeLogin($pending['accountId'], $account, $pending['challenge']);
+                $this->session->remove(Config::$challengeSessionKey);
+                $this->session->remove(Config::$challengeNameSessionKey);
 
-        return true;
+                return true;
+            }
+        );
     }
 
     /**
@@ -380,24 +393,36 @@ class Authorization
      * regeneration + LoginSuccessEvent with the given method name.
      * @param int $accountId
      * @param string $method Method name for LoginSuccessEvent (e.g. 'magic_link')
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool False when the account does not exist or is inactive
      * @throws DatabaseManagerException
      */
-    public function authenticateAs(int $accountId, string $method = 'external'): bool
+    public function authenticateAs(int $accountId, string $method = 'external', ?object $evidence = null): bool
     {
-        $account = $this->account->find([Config::getColumn('id') => $accountId]);
+        return PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::AUTHENTICATE_AS,
+                $this->currentActorId(),
+                $accountId,
+                ['method' => $method],
+                $evidence
+            ),
+            function () use ($accountId, $method): bool {
+                $account = $this->account->find([Config::getColumn('id') => $accountId]);
 
-        if (!$account) {
-            return false;
-        }
+                if (!$account) {
+                    return false;
+                }
 
-        if (empty($account[Config::$tableName][Config::getColumn('active')])) {
-            return false;
-        }
+                if (empty($account[Config::$tableName][Config::getColumn('active')])) {
+                    return false;
+                }
 
-        $this->completeLogin($accountId, $account, $method);
+                $this->completeLogin($accountId, $account, $method);
 
-        return true;
+                return true;
+            }
+        );
     }
 
     /**
@@ -809,12 +834,28 @@ class Authorization
      *
      * @param int $userId The user ID
      * @param string $providerName The 2FA provider name
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @throws DatabaseManagerException
      */
-    public function createPendingTwoFactorState(int $userId, string $providerName): void
+    public function createPendingTwoFactorState(
+        int $userId,
+        string $providerName,
+        ?object $evidence = null
+    ): void
     {
-        $this->session->set(Config::$twoFactorSessionKey, $userId);
-        $this->session->set(Config::$twoFactorProviderSessionKey, $providerName);
+        PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::CREATE_PENDING_TWO_FACTOR,
+                $this->currentActorId(),
+                $userId,
+                ['provider' => $providerName],
+                $evidence
+            ),
+            function () use ($userId, $providerName): void {
+                $this->session->set(Config::$twoFactorSessionKey, $userId);
+                $this->session->set(Config::$twoFactorProviderSessionKey, $providerName);
+            }
+        );
     }
 
     /**
@@ -981,51 +1022,77 @@ class Authorization
     /**
      * Assign role to current user
      * @param string $roleName
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function assignRole(string $roleName): bool
+    public function assignRole(string $roleName, ?object $evidence = null): bool
     {
         if (!$this->isAuthorized()) {
             return false;
         }
 
         $userId = $this->getAuthorizedId();
-        $role = new Role();
-        $roleData = $role->findByName($roleName);
 
-        if (!$roleData) {
-            return false;
-        }
+        return PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::MANAGE_RBAC,
+                $userId,
+                $userId,
+                ['operation' => 'role.assign', 'role' => $roleName],
+                $evidence
+            ),
+            function () use ($userId, $roleName, $evidence): bool {
+                $role = new Role();
+                $roleData = $role->findByName($roleName);
 
-        $role->setId($roleData[Config::getRoleTableName()][Config::getRoleColumn('id')]);
+                if (!$roleData) {
+                    return false;
+                }
 
-        return $role->assignToUser($userId);
+                $role->setId($roleData[Config::getRoleTableName()][Config::getRoleColumn('id')]);
+
+                return $role->assignToUser($userId, $evidence);
+            }
+        );
     }
 
     /**
      * Remove role from current user
      * @param string $roleName
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function removeRole(string $roleName): bool
+    public function removeRole(string $roleName, ?object $evidence = null): bool
     {
         if (!$this->isAuthorized()) {
             return false;
         }
 
         $userId = $this->getAuthorizedId();
-        $role = new Role();
-        $roleData = $role->findByName($roleName);
 
-        if (!$roleData) {
-            return false;
-        }
+        return PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::MANAGE_RBAC,
+                $userId,
+                $userId,
+                ['operation' => 'role.remove', 'role' => $roleName],
+                $evidence
+            ),
+            function () use ($userId, $roleName, $evidence): bool {
+                $role = new Role();
+                $roleData = $role->findByName($roleName);
 
-        $role->setId($roleData[Config::getRoleTableName()][Config::getRoleColumn('id')]);
+                if (!$roleData) {
+                    return false;
+                }
 
-        return $role->removeFromUser($userId);
+                $role->setId($roleData[Config::getRoleTableName()][Config::getRoleColumn('id')]);
+
+                return $role->removeFromUser($userId, $evidence);
+            }
+        );
     }
 
     /**
@@ -1293,22 +1360,40 @@ class Authorization
      * @param string $tokenType Token type (jwt, api_key)
      * @param array $claims Additional claims/metadata
      * @param int|null $expiresIn Token expiration in seconds
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return string Generated token
      * @throws InvalidArgumentException If token type not registered
      */
-    public function generateToken(int $userId, string $tokenType, array $claims = [], ?int $expiresIn = null): string
+    public function generateToken(
+        int $userId,
+        string $tokenType,
+        array $claims = [],
+        ?int $expiresIn = null,
+        ?object $evidence = null
+    ): string
     {
-        $state = new AccountStateService();
-        $account = $state->findActive($userId);
+        return PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::GENERATE_TOKEN,
+                $this->currentActorId(),
+                $userId,
+                ['token_type' => $tokenType],
+                $evidence
+            ),
+            function () use ($userId, $tokenType, $claims, $expiresIn): string {
+                $state = new AccountStateService();
+                $account = $state->findActive($userId);
 
-        if ($account === null) {
-            throw new InvalidArgumentException('Cannot generate a token for an inactive or missing account');
-        }
+                if ($account === null) {
+                    throw new InvalidArgumentException('Cannot generate a token for an inactive or missing account');
+                }
 
-        // Credential epoch is a reserved security value owned by Authorization.
-        $claims['auth_epoch'] = $state->epoch($account);
-        $provider = $this->getTokenProvider($tokenType);
-        return $provider->generateToken($userId, $claims, $expiresIn);
+                // Credential epoch is a reserved security value owned by Authorization.
+                $claims['auth_epoch'] = $state->epoch($account);
+                $provider = $this->getTokenProvider($tokenType);
+                return $provider->generateToken($userId, $claims, $expiresIn);
+            }
+        );
     }
 
     /**
@@ -1382,6 +1467,14 @@ class Authorization
         } catch (\Exception $e) {
             return false;
         }
+    }
+
+    /**
+     * Resolve the current active actor without treating a pending login as proof.
+     */
+    private function currentActorId(): ?int
+    {
+        return $this->isAuthorized() ? $this->getAuthorizedId() : null;
     }
 
 }

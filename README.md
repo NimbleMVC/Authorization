@@ -643,12 +643,12 @@ Zarządza rolami w systemie.
 
 #### Metody klasy Role
 
-- `create(string $name, ?string $description = null): bool` - tworzy nową rolę
+- `create(string $name, ?string $description = null, ?object $evidence = null): bool` - tworzy nową rolę
 - `findByName(string $name): ?array` - wyszukuje rolę po nazwie
-- `assignToUser(int $userId): bool` - przypisuje rolę użytkownikowi
-- `removeFromUser(int $userId): bool` - usuwa rolę od użytkownika
-- `addPermission(int $permissionId): bool` - dodaje uprawnienie do roli
-- `removePermission(int $permissionId): bool` - usuwa uprawnienie z roli
+- `assignToUser(int $userId, ?object $evidence = null): bool` - przypisuje rolę użytkownikowi
+- `removeFromUser(int $userId, ?object $evidence = null): bool` - usuwa rolę od użytkownika
+- `addPermission(int $permissionId, ?object $evidence = null): bool` - dodaje uprawnienie do roli
+- `removePermission(int $permissionId, ?object $evidence = null): bool` - usuwa uprawnienie z roli
 - `getPermissions(): array` - zwraca wszystkie uprawnienia roli
 - `getUsersWithRole(): array` - zwraca wszystkich użytkowników z daną rolą
 
@@ -658,9 +658,9 @@ Zarządza uprawnieniami w systemie.
 
 #### Metody klasy Permission
 
-- `create(string $name, ?string $description = null, ?string $group = null): bool` - tworzy nowe uprawnienie
+- `create(string $name, ?string $description = null, ?string $group = null, ?object $evidence = null): bool` - tworzy nowe uprawnienie
 - `findByName(string $name): ?array` - wyszukuje uprawnienie po nazwie
-- `assignToRole(int $roleId): bool` - przypisuje uprawnienie do roli
+- `assignToRole(int $roleId, ?object $evidence = null): bool` - przypisuje uprawnienie do roli
 - `getRolesWithPermission(): array` - zwraca wszystkie role mające dane uprawnienie
 - `getPermissionGroups(): array` - zwraca wszystkie grupy uprawnień
 
@@ -679,21 +679,21 @@ Zarządza uprawnieniami w systemie.
 
 - `getUserRoles(): array` - zwraca wszystkie role użytkownika
 - `getUserPermissions(): array` - zwraca wszystkie uprawnienia użytkownika
-- `assignRole(string $roleName): bool` - przypisuje rolę użytkownikowi
-- `removeRole(string $roleName): bool` - usuwa rolę od użytkownika
+- `assignRole(string $roleName, ?object $evidence = null): bool` - przypisuje rolę użytkownikowi
+- `removeRole(string $roleName, ?object $evidence = null): bool` - usuwa rolę od użytkownika
 
 ### Rozszerzone metody klasy Account
 
 #### Metody zarządzania rolami konta
 
-- `assignRole(string $roleName, ?int $accountId = null): bool` - przypisuje rolę do konta
-- `removeRole(string $roleName, ?int $accountId = null): bool` - usuwa rolę z konta
+- `assignRole(string $roleName, ?int $accountId = null, ?object $evidence = null): bool` - przypisuje rolę do konta
+- `removeRole(string $roleName, ?int $accountId = null, ?object $evidence = null): bool` - usuwa rolę z konta
 - `hasRole(string $roleName, ?int $accountId = null): bool` - sprawdza czy konto ma rolę
 - `hasPermission(string $permissionName, ?int $accountId = null): bool` - sprawdza czy konto ma uprawnienie
 - `getRoles(?int $accountId = null): array` - zwraca wszystkie role konta
 - `getPermissions(?int $accountId = null): array` - zwraca wszystkie uprawnienia konta
-- `setRoles(array $roleNames, ?int $accountId = null): bool` - ustawia role dla konta (zastępuje istniejące)
-- `clearRoles(?int $accountId = null): bool` - usuwa wszystkie role z konta
+- `setRoles(array $roleNames, ?int $accountId = null, ?object $evidence = null): bool` - ustawia role dla konta (zastępuje istniejące)
+- `clearRoles(?int $accountId = null, ?object $evidence = null): bool` - usuwa wszystkie role z konta
 
 ## Przykład użycia
 
@@ -704,6 +704,56 @@ use NimblePHP\Authorization\Authorization;
 
 $auth = new Authorization();
 ```
+
+### Granica operacji uprzywilejowanych
+
+Operacje mogące utworzyć sesję, wystawić token albo zmienić RBAC są domyślnie
+blokowane (`deny all`). Aplikacja musi podczas zaufanego bootstrapa ustawić
+`PrivilegedOperationPolicy`; brak konfiguracji albo wyjątek polityki kończy się
+`PrivilegedOperationDeniedException` (HTTP 403), zanim zostanie zmieniony stan.
+
+```php
+use NimblePHP\Authorization\Config;
+use NimblePHP\Authorization\Policies\CallbackPrivilegedOperationPolicy;
+use NimblePHP\Authorization\PrivilegedAction;
+use NimblePHP\Authorization\PrivilegedOperation;
+
+Config::setPrivilegedOperationPolicy(
+    new CallbackPrivilegedOperationPolicy(
+        static function (PrivilegedOperation $operation): bool {
+            $actorCanManageAuthorization = $operation->actorAccountId !== null
+                && Config::getPermissionProvider()->hasPermission(
+                    $operation->actorAccountId,
+                    'authorization.manage'
+                );
+
+            // Klasa aplikacji tworzona wyłącznie przez zaufany weryfikator
+            // hasła, magic linku, passkey albo drugiego składnika.
+            $hasVerifiedEvidence = $operation->evidence instanceof VerifiedAuthEvidence
+                && $operation->evidence->allows($operation);
+
+            return match ($operation->action) {
+                PrivilegedAction::MANAGE_RBAC =>
+                    $actorCanManageAuthorization || $hasVerifiedEvidence,
+                PrivilegedAction::GENERATE_TOKEN =>
+                    $operation->actorAccountId === $operation->targetAccountId
+                    || $actorCanManageAuthorization,
+                PrivilegedAction::AUTHENTICATE_AS =>
+                    $hasVerifiedEvidence || $actorCanManageAuthorization,
+                PrivilegedAction::COMPLETE_CHALLENGE,
+                PrivilegedAction::CREATE_PENDING_TWO_FACTOR => $hasVerifiedEvidence,
+            };
+        }
+    )
+);
+```
+
+Do `evidence` należy przekazywać obiekt będący wynikiem zakończonej weryfikacji,
+nie boolean, parametr HTTP ani DTO zbudowane bezpośrednio z żądania. Polityka
+otrzymuje akcję, aktywnego aktora, konto docelowe i kontekst operacji. Ochroną
+objęte są `completeChallenge`, `authenticateAs`, `createPendingTwoFactorState`,
+`generateToken` oraz wszystkie publiczne mutacje w `Authorization`, `Account`,
+`Role` i `Permission`. Odczyty RBAC pozostają dostępne bez tej polityki.
 
 ### Rejestracja użytkownika
 
@@ -1044,6 +1094,10 @@ przenosić `auth_epoch` zwrócone w `claims` do wyniku `validateToken()`.
 
 ### Praca z RBAC
 
+Poniższe mutacje zakładają, że `$rbacCapability` jest utworzonym przez aplikację,
+zweryfikowanym obiektem dopuszczanym przez `PrivilegedOperationPolicy`. Nie
+twórz go bezpośrednio z parametrów żądania.
+
 #### Tworzenie ról i uprawnień
 
 ```php
@@ -1052,13 +1106,13 @@ use NimblePHP\Authorization\Permission;
 
 // Tworzenie roli administratora
 $role = new Role();
-$role->create('admin', 'Administrator systemu');
+$role->create('admin', 'Administrator systemu', $rbacCapability);
 
 // Tworzenie uprawnień
 $permission = new Permission();
-$permission->create('users.manage', 'Zarządzanie użytkownikami', 'users');
-$permission->create('content.publish', 'Publikacja treści', 'content');
-$permission->create('system.settings', 'Ustawienia systemu', 'system');
+$permission->create('users.manage', 'Zarządzanie użytkownikami', 'users', $rbacCapability);
+$permission->create('content.publish', 'Publikacja treści', 'content', $rbacCapability);
+$permission->create('system.settings', 'Ustawienia systemu', 'system', $rbacCapability);
 ```
 
 #### Przypisywanie uprawnień do ról
@@ -1072,9 +1126,9 @@ $roleData = $role->findByName('admin');
 $role->setId($roleData['roles']['id']);
 
 // Dodaj uprawnienia do roli
-$role->addPermission(1); // users.manage
-$role->addPermission(2); // content.publish
-$role->addPermission(3); // system.settings
+$role->addPermission(1, $rbacCapability); // users.manage
+$role->addPermission(2, $rbacCapability); // content.publish
+$role->addPermission(3, $rbacCapability); // system.settings
 ```
 
 #### Zarządzanie użytkownikami i rolami
@@ -1091,7 +1145,7 @@ $userId = $auth->getAuthorizedId();
 
 // Przypisz rolę administratora użytkownikowi
 $account->setId($userId);
-$account->assignRole('admin');
+$account->assignRole('admin', null, $rbacCapability);
 
 // Sprawdź czy użytkownik ma rolę
 if ($auth->hasRole('admin')) {
@@ -1203,14 +1257,14 @@ use NimblePHP\Authorization\Account;
 
 // Tworzenie nowej roli
 $role = new Role();
-$role->create('editor', 'Edytor treści');
+$role->create('editor', 'Edytor treści', $rbacCapability);
 
 // Przypisywanie roli do użytkownika
 $account = new Account($userId);
-$account->assignRole('editor');
+$account->assignRole('editor', null, $rbacCapability);
 
 // Usuwanie roli od użytkownika
-$account->removeRole('editor');
+$account->removeRole('editor', null, $rbacCapability);
 
 // Pobieranie wszystkich użytkowników z rolą
 $role = new Role();
