@@ -406,9 +406,13 @@ Nawet poprawna para `(provider, subject)` nie zaloguje konta usuniętego lub z
 `active = 0`. Kontrola jest niezależna od `AUTHORIZATION_REQUIRE_ACTIVATION` i
 jest ponawiana centralnie przed utworzeniem sesji.
 
-### 3. Rate Limiting
+### 5. Rate Limiting
 
-Rate limiting biblioteki chroni przed atakami brute-force:
+Wbudowany limiter jest wywoływany przez logowanie hasłem, nie przez
+`initiateOAuthLogin()`, callback OAuth ani endpoint powrotu od providera.
+Ograniczenie liczby inicjacji/callbacków OAuth należy dodać w routingu lub
+gateway aplikacji. Poniższe metody pokazują wyłącznie stan limitera logowania
+hasłem dla wskazanego identyfikatora:
 
 ```php
 if ($auth->isLoginRateLimited($identifier)) {

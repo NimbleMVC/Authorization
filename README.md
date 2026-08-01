@@ -6,7 +6,7 @@ Kompletna biblioteka autoryzacyjna dla frameworka NimblePHP z funkcjonalnościam
 - Ochrona przed atakami brute-force (Rate Limiting)
 - Elastyczne, niestandardowe hasherowanie haseł
 - Automatyczne aktualizowanie skrótów haseł
-- Dwuetapowa weryfikacja (2FA) - TOTP i Email
+- Dwuetapowa weryfikacja (2FA) - wbudowany przepływ TOTP oraz niskopoziomowy EmailProvider
 - OAuth2 - Logowanie społeczne (GitHub)
 - JWT - Bezstanowe tokeny dla API
 - API Keys - Stacjonarne klucze dla dostępu programistycznego
@@ -82,7 +82,10 @@ composer require nimblephp/authorization
 
 ### Rate Limiting (Ochrona przed atakami brute-force)
 
-Biblioteka zawiera wbudowaną ochronę przed atakami brute-force na logowanie. System Rate Limiting śledzi nieudane próby logowania i tymczasowo blokuje konto.
+Biblioteka zawiera wbudowaną ochronę przed atakami brute-force na logowanie
+hasłem. System śledzi nieudane próby pierwszego składnika według identyfikatora
+i opcjonalnie IP. Nie obejmuje `verifyTwoFactorCode()`, OAuth ani uwierzytelniania
+tokenem; te wejścia wymagają osobnych limiterów w aplikacji.
 
 #### Konfiguracja Rate Limiting
 
@@ -222,9 +225,11 @@ try {
 
 ### Dwuetapowa weryfikacja (2FA)
 
-Biblioteka zawiera wbudowaną obsługę uwierzytelniania dwuetapowego (2FA/MFA). Obsługuje wiele metod weryfikacji:
+Biblioteka zawiera wbudowany przepływ uwierzytelniania dwuetapowego TOTP:
 - **TOTP** (Time-based One-Time Password) - zgodne z Google Authenticator i innymi aplikacjami
-- **Email** - kody wysyłane na adres email użytkownika
+- **EmailProvider** - niskopoziomowy, pamięciowy generator kodów; nie jest
+  podłączony do standardowego przepływu `login()` i nie jest trwałym
+  rozwiązaniem produkcyjnym
 
 #### Konfiguracja 2FA
 
@@ -238,7 +243,8 @@ use NimblePHP\Authorization\Providers\EmailProvider;
 // Zarejestruj TOTP provider (Google Authenticator)
 Config::registerTwoFactorProvider('totp', new TOTPProvider('Moja Aplikacja'));
 
-// Zarejestruj Email provider
+// EmailProvider jest tylko building blockiem. Samo zarejestrowanie go nie
+// uruchamia emailowego 2FA w standardowym login().
 $emailProvider = new EmailProvider();
 $emailProvider->setEmailCallback(function($email, $code) {
     // Wyślij kod na email użytkownika
@@ -250,6 +256,11 @@ Config::registerTwoFactorProvider('email', $emailProvider);
 #### TOTP (Google Authenticator)
 
 TOTP jest najbardziej bezpieczną i popularną metodą 2FA. Generuje kody QR, które użytkownik skanuje swoją aplikacją authenticatora.
+
+Wbudowany `Account` zapisuje sekret TOTP w skonfigurowanej kolumnie w postaci
+umożliwiającej jego późniejszy odczyt. Nie jest on hashowany ani szyfrowany
+przez moduł. TOTP wymaga odzyskania sekretu do weryfikacji, dlatego aplikacja
+powinna zapewnić szyfrowanie kolumny/bazy i ograniczyć dostęp do niej.
 
 **Włączenie 2FA dla użytkownika:**
 
@@ -324,7 +335,12 @@ try {
 
 #### Email 2FA
 
-Email provider wysyła kody weryfikacyjne na adres email użytkownika.
+`EmailProvider` potrafi wygenerować, wysłać callbackiem i sprawdzić kod w
+pamięci bieżącego procesu. Nie jest jednak podłączony do standardowego
+`Authorization::login()`: `generateSecret()` zwraca pustą wartość, więc samo
+`enableTwoFactorAuth()`/zarejestrowanie providera nie tworzy działającego
+emailowego drugiego składnika. Kod nie przetrwa też kolejnego procesu/workera.
+Do produkcji potrzebny jest własny trwały magazyn i osobna integracja przepływu.
 
 **Konfiguracja:**
 
@@ -1610,7 +1626,9 @@ zostać ponownie użyty.
 
 ### API Keys
 
-Stacjonarne klucze API z loggingiem i rate limitingiem.
+Stacjonarne klucze API z walidacją, wygaśnięciem, revocation i rejestrowaniem
+użycia. Pola `scopes` oraz `rate_limit` są metadanymi — provider sam nie
+odrzuca żądania bez scope i nie zwraca 429 po przekroczeniu limitu.
 
 #### Konfiguracja
 
@@ -1651,6 +1669,12 @@ try {
     $keyData = $auth->validateToken($apiKey, 'api_key');
     $userId = $keyData['user_id'];
     $scopes = $keyData['scopes'];
+
+    // Egzekwowanie scope należy do aplikacji.
+    if (!in_array('read:users', $scopes, true)) {
+        http_response_code(403);
+        exit;
+    }
     
 } catch (Exception $e) {
     http_response_code(401);
@@ -1685,6 +1709,11 @@ $auth->revokeToken($apiKey, 'api_key');
 ```
 
 #### Rate Limiting
+
+`getRateLimit()` wyłącznie raportuje licznik użyć z ostatniej godziny. Nie
+blokuje klucza i nie jest automatycznie wywoływane przez middleware modułu.
+Poniższa decyzja 429 jest przykładem kodu aplikacji, nie zabezpieczeniem
+wbudowanym w `APIKeyProvider`.
 
 ```php
 $provider = $auth->getTokenProvider('api_key');

@@ -5,10 +5,13 @@ namespace NimblePHP\Authorization\Providers;
 use NimblePHP\Authorization\Interfaces\TwoFactorProvider;
 
 /**
- * Email-based two-factor authentication provider
+ * Low-level, in-memory email verification-code provider.
  *
  * Sends verification codes to user's email address.
  * Codes are numeric and time-limited (default 10 minutes).
+ * It is not wired into Authorization::login() and its state is not shared
+ * between requests/workers; applications need a persistent integration for
+ * production email-based 2FA.
  */
 class EmailProvider implements TwoFactorProvider
 {
