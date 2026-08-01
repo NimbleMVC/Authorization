@@ -1551,9 +1551,13 @@ use NimblePHP\Authorization\Config;
 use NimblePHP\Authorization\Providers\JWTProvider;
 
 $jwtProvider = new JWTProvider(
-    $_ENV['JWT_SECRET'],  // Minimum 32 characters
-    'HS256',              // Algorithm
-    3600                  // Default expiration (1 hour)
+    $_ENV['JWT_SECRET'],
+    algorithm: 'HS256',
+    defaultExpirationTime: 3600,
+    issuer: 'my-application',
+    audience: 'my-api',
+    maximumLifetime: 86400,
+    clockSkew: 30,
 );
 
 Config::registerTokenProvider('jwt', $jwtProvider);
@@ -1593,8 +1597,16 @@ try {
 }
 ```
 
-JWT zawiera zastrzeżony claim `auth_epoch`; wartość przekazana przez aplikację
-w tablicy dodatkowych claims jest nadpisywana stanem konta.
+Chronione claims `user_id`, `sub`, `iat`, `nbf`, `exp`, `jti`, `iss`, `aud`
+i `auth_epoch` nie mogą być przekazane w tablicy dodatkowych claims. Próba
+kończy się `InvalidArgumentException`; wartości systemowe nie są scalane z
+danymi żądania. JWT zawsze zawiera poprawne `user_id`, `iat`, `exp` i `jti`,
+ma ograniczony maksymalny TTL, a skonfigurowane issuer/audience są wymagane
+podczas walidacji. `nbf` jest generowany przez provider i również walidowany.
+
+`JWTProvider::refreshToken()` rotuje `jti` i zwraca nowy token dopiero po
+skutecznym zapisaniu poprzedniego `jti` na blackliście. Stary token nie może
+zostać ponownie użyty.
 
 ### API Keys
 

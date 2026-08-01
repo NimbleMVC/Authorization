@@ -44,9 +44,13 @@ $jwtSecret = $_ENV['JWT_SECRET'] ?? bin2hex(random_bytes(32));
 
 // Rejestruj provider
 $jwtProvider = new JWTProvider(
-    $jwtSecret,              // Secret key (minimum 32 characters)
-    'HS256',                 // Algorithm (HS256, HS512, itd.)
-    3600                     // Default expiration (1 hour)
+    $jwtSecret,
+    algorithm: 'HS256',
+    defaultExpirationTime: 3600,
+    issuer: 'my-application',
+    audience: 'my-api',
+    maximumLifetime: 86400,
+    clockSkew: 30,
 );
 
 Config::registerTokenProvider('jwt', $jwtProvider);
@@ -59,6 +63,9 @@ Config::registerTokenProvider('jwt', $jwtProvider);
 JWT_SECRET=your_long_secret_key_minimum_32_characters
 JWT_ALGORITHM=HS256
 JWT_EXPIRATION=3600
+JWT_MAXIMUM_LIFETIME=86400
+JWT_ISSUER=my-application
+JWT_AUDIENCE=my-api
 ```
 
 ### Generowanie tokenów JWT
@@ -97,10 +104,16 @@ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJpYXQiOjE3MDAwMDAwMDAsImV
 ```
 
 - **Header**: `{"alg":"HS256","typ":"JWT"}`
-- **Payload**: `{"user_id":1,"iat":1700000000,"exp":1700003600}`
+- **Payload**: zawiera systemowe `user_id`, `sub`, `iat`, `nbf`, `exp`, `jti`
+  oraz skonfigurowane `iss` i `aud`
 - **Stan konta**: payload zawiera także zastrzeżony `auth_epoch`, nadawany
   przez `Authorization::generateToken()`
 - **Signature**: HMAC-SHA256(header.payload, secret)
+
+Claims `user_id`, `sub`, `iat`, `nbf`, `exp`, `jti`, `iss`, `aud` i
+`auth_epoch` są chronione. Nie przekazuj ich w tablicy `$claims` — próba ich
+ustawienia jest odrzucana zamiast scalania z wartościami systemowymi.
+`expiresIn` musi być dodatni i nie może przekraczać `maximumLifetime`.
 
 ### Walidacja tokenów JWT
 
@@ -181,7 +194,7 @@ try {
     // Waliduj stary token
     $oldData = $auth->validateToken($oldToken, 'jwt');
     
-    // Utwórz nowy token z tymi samymi danymi
+    // Utwórz nowy token; operacja rotuje jti i wycofuje stary token
     $newToken = $provider->refreshToken($oldToken, 3600);
     
     echo json_encode([
@@ -194,6 +207,9 @@ try {
     echo json_encode(['error' => 'Failed to refresh token']);
 }
 ```
+
+Nowy token jest zwracany tylko wtedy, gdy zapis starego `jti` na blackliście
+zakończył się sukcesem. Po udanym refreshu `$oldToken` jest nieważny.
 
 ### Revocation tokenów JWT
 
@@ -593,7 +609,14 @@ use NimblePHP\Authorization\Providers\JWTProvider;
 use NimblePHP\Authorization\Providers\APIKeyProvider;
 
 // Rejestruj providery
-$jwtProvider = new JWTProvider($_ENV['JWT_SECRET'], 'HS256', 3600);
+$jwtProvider = new JWTProvider(
+    $_ENV['JWT_SECRET'],
+    algorithm: 'HS256',
+    defaultExpirationTime: 3600,
+    issuer: 'my-application',
+    audience: 'my-api',
+    maximumLifetime: 86400,
+);
 Config::registerTokenProvider('jwt', $jwtProvider);
 
 $apiKeyProvider = new APIKeyProvider();

@@ -14,7 +14,7 @@ interface TokenProvider
      *
      * @param int $userId User ID
      * @param array $claims Additional claims/metadata
-     * @param int|null $expiresIn Token expiration time in seconds (null = no expiration)
+     * @param int|null $expiresIn Provider-specific expiration time (JWT uses its configured default when null)
      * @return string The generated token
      * @throws \Exception If token generation fails
      */

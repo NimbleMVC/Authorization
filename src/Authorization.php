@@ -42,6 +42,19 @@ use NimblePHP\Framework\Translation\Translation;
 class Authorization
 {
 
+    /** @var list<string> */
+    private const PROTECTED_TOKEN_CLAIMS = [
+        'user_id',
+        'sub',
+        'iat',
+        'nbf',
+        'exp',
+        'jti',
+        'iss',
+        'aud',
+        'auth_epoch',
+    ];
+
     /**
      * Session instance
      * @var Session
@@ -1372,6 +1385,18 @@ class Authorization
         ?object $evidence = null
     ): string
     {
+        $protectedClaims = array_values(array_intersect(
+            self::PROTECTED_TOKEN_CLAIMS,
+            array_keys($claims)
+        ));
+
+        if ($protectedClaims !== []) {
+            throw new InvalidArgumentException(sprintf(
+                'Protected token claims cannot be supplied by the caller: %s',
+                implode(', ', $protectedClaims)
+            ));
+        }
+
         return PrivilegedOperationGate::execute(
             new PrivilegedOperation(
                 PrivilegedAction::GENERATE_TOKEN,
