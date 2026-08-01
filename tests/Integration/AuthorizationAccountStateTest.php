@@ -305,16 +305,27 @@ final class AuthorizationAccountStateTest extends TestCase
         self::assertArrayNotHasKey('account_id', $_SESSION);
     }
 
-    public function testGeneratedTokenReceivesCurrentCredentialEpoch(): void
+    public function testGeneratedTokenRejectsCallerControlledClaimsAndReceivesCurrentCredentialEpoch(): void
     {
         $this->insertAccount(active: 1, epoch: 9);
         $provider = new AccountStateTokenProvider();
         Config::registerTokenProvider('epoch_generation_test', $provider);
 
+        foreach ([
+            'user_id', 'sub', 'iat', 'nbf', 'exp', 'jti', 'iss', 'aud', 'auth_epoch'
+        ] as $claim) {
+            try {
+                $this->authorization->generateToken(1, 'epoch_generation_test', [$claim => 'attacker']);
+                self::fail(sprintf('Protected claim %s should have been rejected', $claim));
+            } catch (InvalidArgumentException $exception) {
+                self::assertStringContainsString($claim, $exception->getMessage());
+            }
+        }
+
         self::assertSame('generated-token', $this->authorization->generateToken(
             1,
             'epoch_generation_test',
-            ['purpose' => 'test', 'auth_epoch' => -1],
+            ['purpose' => 'test'],
         ));
         self::assertSame(9, $provider->generatedClaims['auth_epoch']);
         self::assertSame('test', $provider->generatedClaims['purpose']);
