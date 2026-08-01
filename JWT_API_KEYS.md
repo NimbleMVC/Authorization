@@ -25,6 +25,10 @@ Przewodnik implementacji JWT (JSON Web Tokens) i API Keys dla staeless token-bas
 
 JWT to standard (RFC 7519) dla bezpiecznego przesyłania informacji między stronami w formie JSON obiektu.
 
+> `Authorization::generateToken()` wymaga jawnej zgody skonfigurowanej
+> `PrivilegedOperationPolicy`. Domyślna polityka blokuje wystawianie tokenów;
+> przykładowa konfiguracja granicy znajduje się w głównym `README.md`.
+
 ### Konfiguracja JWT
 
 #### 1. Rejestracja providera JWT

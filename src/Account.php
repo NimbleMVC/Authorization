@@ -15,6 +15,7 @@ use NimblePHP\Authorization\Interfaces\AccountTokenRevoker;
 use NimblePHP\Authorization\Providers\APIKeyProvider;
 use NimblePHP\Authorization\Services\AccountStateService;
 use NimblePHP\Authorization\Services\RememberMeService;
+use NimblePHP\Authorization\Services\PrivilegedOperationGate;
 use NimblePHP\Framework\Kernel;
 
 /**
@@ -329,10 +330,15 @@ class Account
      * Assign role to account
      * @param string $roleName
      * @param int|null $accountId
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function assignRole(string $roleName, ?int $accountId = null): bool
+    public function assignRole(
+        string $roleName,
+        ?int $accountId = null,
+        ?object $evidence = null
+    ): bool
     {
         $userId = $accountId ?? $this->id;
 
@@ -340,26 +346,42 @@ class Account
             return false;
         }
 
-        $role = new Role();
-        $roleData = $role->findByName($roleName);
+        return PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::MANAGE_RBAC,
+                null,
+                (int)$userId,
+                ['operation' => 'role.assign', 'role' => $roleName],
+                $evidence
+            ),
+            function () use ($userId, $roleName, $evidence): bool {
+                $role = new Role();
+                $roleData = $role->findByName($roleName);
 
-        if (!$roleData) {
-            return false;
-        }
+                if (!$roleData) {
+                    return false;
+                }
 
-        $role->setId($roleData[Config::getRoleTableName()][Config::getRoleColumn('id')]);
+                $role->setId($roleData[Config::getRoleTableName()][Config::getRoleColumn('id')]);
 
-        return $role->assignToUser($userId);
+                return $role->assignToUser((int)$userId, $evidence);
+            }
+        );
     }
 
     /**
      * Remove role from account
      * @param string $roleName
      * @param int|null $accountId
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function removeRole(string $roleName, ?int $accountId = null): bool
+    public function removeRole(
+        string $roleName,
+        ?int $accountId = null,
+        ?object $evidence = null
+    ): bool
     {
         $userId = $accountId ?? $this->id;
 
@@ -367,16 +389,27 @@ class Account
             return false;
         }
 
-        $role = new Role();
-        $roleData = $role->findByName($roleName);
+        return PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::MANAGE_RBAC,
+                null,
+                (int)$userId,
+                ['operation' => 'role.remove', 'role' => $roleName],
+                $evidence
+            ),
+            function () use ($userId, $roleName, $evidence): bool {
+                $role = new Role();
+                $roleData = $role->findByName($roleName);
 
-        if (!$roleData) {
-            return false;
-        }
+                if (!$roleData) {
+                    return false;
+                }
 
-        $role->setId($roleData[Config::getRoleTableName()][Config::getRoleColumn('id')]);
+                $role->setId($roleData[Config::getRoleTableName()][Config::getRoleColumn('id')]);
 
-        return $role->removeFromUser($userId);
+                return $role->removeFromUser((int)$userId, $evidence);
+            }
+        );
     }
 
     /**
@@ -509,10 +542,15 @@ class Account
      * Set roles for account (replace all)
      * @param array $roleNames
      * @param int|null $accountId
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function setRoles(array $roleNames, ?int $accountId = null): bool
+    public function setRoles(
+        array $roleNames,
+        ?int $accountId = null,
+        ?object $evidence = null
+    ): bool
     {
         $userId = $accountId ?? $this->id;
 
@@ -520,22 +558,34 @@ class Account
             return false;
         }
 
-        $this->clearRoles($userId);
+        return PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::MANAGE_RBAC,
+                null,
+                (int)$userId,
+                ['operation' => 'roles.replace', 'roles' => array_values($roleNames)],
+                $evidence
+            ),
+            function () use ($roleNames, $userId, $evidence): bool {
+                $this->clearRoles((int)$userId, $evidence);
 
-        foreach ($roleNames as $roleName) {
-            $this->assignRole($roleName, $userId);
-        }
+                foreach ($roleNames as $roleName) {
+                    $this->assignRole($roleName, (int)$userId, $evidence);
+                }
 
-        return true;
+                return true;
+            }
+        );
     }
 
     /**
      * Clear all roles from account
      * @param int|null $accountId
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function clearRoles(?int $accountId = null): bool
+    public function clearRoles(?int $accountId = null, ?object $evidence = null): bool
     {
         $userId = $accountId ?? $this->id;
 
@@ -543,21 +593,32 @@ class Account
             return false;
         }
 
-        $currentRoles = $this->getRoles($userId);
-        $userRolesTable = new Table(Config::getUserRoleTableName());
-        $result = $userRolesTable->deleteByConditions([Config::getUserRoleColumn('user_id') => $userId]);
+        return PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::MANAGE_RBAC,
+                null,
+                (int)$userId,
+                ['operation' => 'roles.clear'],
+                $evidence
+            ),
+            function () use ($userId): bool {
+                $currentRoles = $this->getRoles((int)$userId);
+                $userRolesTable = new Table(Config::getUserRoleTableName());
+                $result = $userRolesTable->deleteByConditions([Config::getUserRoleColumn('user_id') => $userId]);
 
-        if ($result) {
-            foreach ($currentRoles as $roleData) {
-                $roleName = $roleData[Config::getRoleTableName()][Config::getRoleColumn('name')] ?? null;
+                if ($result) {
+                    foreach ($currentRoles as $roleData) {
+                        $roleName = $roleData[Config::getRoleTableName()][Config::getRoleColumn('name')] ?? null;
 
-                if ($roleName !== null) {
-                    Kernel::dispatchEvent(new RoleRemovedEvent((int)$userId, (string)$roleName));
+                        if ($roleName !== null) {
+                            Kernel::dispatchEvent(new RoleRemovedEvent((int)$userId, (string)$roleName));
+                        }
+                    }
                 }
-            }
-        }
 
-        return $result;
+                return $result;
+            }
+        );
     }
 
     /**

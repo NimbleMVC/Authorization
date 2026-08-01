@@ -5,6 +5,7 @@ namespace NimblePHP\Authorization;
 use InvalidArgumentException;
 use krzysztofzylka\DatabaseManager\Exception\DatabaseManagerException;
 use krzysztofzylka\DatabaseManager\Table;
+use NimblePHP\Authorization\Services\PrivilegedOperationGate;
 use NimblePHP\Framework\Translation\Translation;
 
 /**
@@ -97,66 +98,89 @@ class Permission
      * @param string $name
      * @param string|null $description
      * @param string|null $group
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function create(string $name, ?string $description = null, ?string $group = null): bool
+    public function create(
+        string $name,
+        ?string $description = null,
+        ?string $group = null,
+        ?object $evidence = null
+    ): bool
     {
-        if (empty(trim($name))) {
-            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.permission_name_empty'));
-        }
+        return $this->privileged(
+            ['operation' => 'permission.create', 'permission' => $name],
+            $evidence,
+            function () use ($name, $description, $group): bool {
+                if (empty(trim($name))) {
+                    throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.permission_name_empty'));
+                }
 
-        if ($this->permissionExists($name)) {
-            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.permission_already_exists'));
-        }
+                if ($this->permissionExists($name)) {
+                    throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.permission_already_exists'));
+                }
 
-        $data = [
-            Config::getPermissionColumn('name') => trim($name),
-            Config::getPermissionColumn('created_at') => date('Y-m-d H:i:s')
-        ];
+                $data = [
+                    Config::getPermissionColumn('name') => trim($name),
+                    Config::getPermissionColumn('created_at') => date('Y-m-d H:i:s')
+                ];
 
-        if ($description) {
-            $data[Config::getPermissionColumn('description')] = trim($description);
-        }
+                if ($description) {
+                    $data[Config::getPermissionColumn('description')] = trim($description);
+                }
 
-        if ($group) {
-            $data[Config::getPermissionColumn('group')] = trim($group);
-        }
+                if ($group) {
+                    $data[Config::getPermissionColumn('group')] = trim($group);
+                }
 
-        return $this->permissionsTable->insert($data);
+                return $this->permissionsTable->insert($data);
+            }
+        );
     }
 
     /**
      * Update permission
      * @param array $data
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function update(array $data): bool
+    public function update(array $data, ?object $evidence = null): bool
     {
         if (!$this->id) {
             return false;
         }
 
-        return $this->permissionsTable->update($data);
+        return $this->privileged(
+            ['operation' => 'permission.update', 'permission_id' => $this->id],
+            $evidence,
+            fn(): bool => $this->permissionsTable->update($data)
+        );
     }
 
     /**
      * Delete permission
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function delete(): bool
+    public function delete(?object $evidence = null): bool
     {
         if (!$this->id) {
             return false;
         }
 
-        // Remove permission from all roles
-        $rolePermissionsTable = new Table(Config::getRolePermissionTableName());
-        $rolePermissionsTable->deleteByConditions([Config::getRolePermissionColumn('permission_id') => $this->id]);
+        return $this->privileged(
+            ['operation' => 'permission.delete', 'permission_id' => $this->id],
+            $evidence,
+            function (): bool {
+                $rolePermissionsTable = new Table(Config::getRolePermissionTableName());
+                $rolePermissionsTable->deleteByConditions([Config::getRolePermissionColumn('permission_id') => $this->id]);
 
-        return $this->permissionsTable->delete();
+                return $this->permissionsTable->delete();
+            }
+        );
     }
 
     /**
@@ -276,55 +300,80 @@ class Permission
     /**
      * Assign permission to role
      * @param int $roleId
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function assignToRole(int $roleId): bool
+    public function assignToRole(int $roleId, ?object $evidence = null): bool
     {
         if (!$this->id) {
             return false;
         }
 
-        if ($this->isAssignedToRole($roleId)) {
-            return true;
-        }
+        return $this->privileged(
+            ['operation' => 'permission.role.assign', 'permission_id' => $this->id, 'role_id' => $roleId],
+            $evidence,
+            function () use ($roleId): bool {
+                if ($this->isAssignedToRole($roleId)) {
+                    return true;
+                }
 
-        $rolePermissionsTable = new Table(Config::getRolePermissionTableName());
+                $rolePermissionsTable = new Table(Config::getRolePermissionTableName());
 
-        return $rolePermissionsTable->insert([
-            Config::getRolePermissionColumn('role_id') => $roleId,
-            Config::getRolePermissionColumn('permission_id') => $this->id,
-            Config::getRolePermissionColumn('assigned_at') => date('Y-m-d H:i:s')
-        ]);
+                return $rolePermissionsTable->insert([
+                    Config::getRolePermissionColumn('role_id') => $roleId,
+                    Config::getRolePermissionColumn('permission_id') => $this->id,
+                    Config::getRolePermissionColumn('assigned_at') => date('Y-m-d H:i:s')
+                ]);
+            }
+        );
     }
 
     /**
      * Remove permission from role
      * @param int $roleId
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function removeFromRole(int $roleId): bool
+    public function removeFromRole(int $roleId, ?object $evidence = null): bool
     {
         if (!$this->id) {
             return false;
         }
 
-        $rolePermissionsTable = new Table(Config::getRolePermissionTableName());
+        return $this->privileged(
+            ['operation' => 'permission.role.remove', 'permission_id' => $this->id, 'role_id' => $roleId],
+            $evidence,
+            function () use ($roleId): bool {
+                $rolePermissionsTable = new Table(Config::getRolePermissionTableName());
 
-        return $rolePermissionsTable->deleteByConditions([
-            Config::getRolePermissionColumn('role_id') => $roleId,
-            Config::getRolePermissionColumn('permission_id') => $this->id
-        ]);
+                return $rolePermissionsTable->deleteByConditions([
+                    Config::getRolePermissionColumn('role_id') => $roleId,
+                    Config::getRolePermissionColumn('permission_id') => $this->id
+                ]);
+            }
+        );
     }
 
     /**
-     * Get permissions table instance
-     * @return Table
+     * @template T
+     * @param array<string, mixed> $context
+     * @param callable(): T $callback
+     * @return T
      */
-    public function getPermissionsTable(): Table
+    private function privileged(array $context, ?object $evidence, callable $callback): mixed
     {
-        return $this->permissionsTable;
+        return PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::MANAGE_RBAC,
+                null,
+                null,
+                $context,
+                $evidence
+            ),
+            $callback
+        );
     }
 
 }

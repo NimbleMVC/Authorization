@@ -69,7 +69,7 @@ class BeforeLoginEvent extends AbstractEvent
      * Require an additional challenge before the session is created
      *
      * Credentials stay verified; login() stores a pending state and throws
-     * PendingChallengeException. Complete with Authorization::completeChallenge().
+     * PendingChallengeException. Complete with Authorization::completeChallenge($verifiedEvidence).
      * @param string $name Challenge name (e.g. 'totp')
      * @return void
      */

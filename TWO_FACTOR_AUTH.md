@@ -542,7 +542,7 @@ $emailProvider->setEmailCallback(function($email, $code) {
 - `disableTwoFactorAuth(): bool`
 - `isTwoFactorEnabled(?int $userId = null): bool`
 - `getPendingTwoFactorUserId(): ?int`
-- `createPendingTwoFactorState(int $userId, string $providerName): void`
+- `createPendingTwoFactorState(int $userId, string $providerName, ?object $evidence = null): void` — wymaga zgody `PrivilegedOperationPolicy`
 
 ### TOTPProvider
 

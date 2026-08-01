@@ -8,6 +8,7 @@ use krzysztofzylka\DatabaseManager\Table;
 use NimblePHP\Authorization\Events\RoleAssignedEvent;
 use NimblePHP\Authorization\Events\RolePermissionChangedEvent;
 use NimblePHP\Authorization\Events\RoleRemovedEvent;
+use NimblePHP\Authorization\Services\PrivilegedOperationGate;
 use NimblePHP\Framework\Kernel;
 use NimblePHP\Framework\Translation\Translation;
 
@@ -114,64 +115,83 @@ class Role
      * Create a new role
      * @param string $name
      * @param string|null $description
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function create(string $name, ?string $description = null): bool
+    public function create(string $name, ?string $description = null, ?object $evidence = null): bool
     {
-        if (empty(trim($name))) {
-            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.role_name_empty'));
-        }
+        return $this->privileged(
+            null,
+            ['operation' => 'role.create', 'role' => $name],
+            $evidence,
+            function () use ($name, $description): bool {
+                if (empty(trim($name))) {
+                    throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.role_name_empty'));
+                }
 
-        if ($this->roleExists($name)) {
-            throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.role_already_exists'));
-        }
+                if ($this->roleExists($name)) {
+                    throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.errors.role_already_exists'));
+                }
 
-        $data = [
-            Config::getRoleColumn('name') => trim($name),
-            Config::getRoleColumn('created_at') => date('Y-m-d H:i:s')
-        ];
+                $data = [
+                    Config::getRoleColumn('name') => trim($name),
+                    Config::getRoleColumn('created_at') => date('Y-m-d H:i:s')
+                ];
 
-        if ($description) {
-            $data[Config::getRoleColumn('description')] = trim($description);
-        }
+                if ($description) {
+                    $data[Config::getRoleColumn('description')] = trim($description);
+                }
 
-        return $this->rolesTable->insert($data);
+                return $this->rolesTable->insert($data);
+            }
+        );
     }
 
     /**
      * Update role
      * @param array $data
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function update(array $data): bool
+    public function update(array $data, ?object $evidence = null): bool
     {
         if (!$this->id) {
             return false;
         }
 
-        return $this->rolesTable->update($data);
+        return $this->privileged(
+            null,
+            ['operation' => 'role.update', 'role_id' => $this->id],
+            $evidence,
+            fn(): bool => $this->rolesTable->update($data)
+        );
     }
 
     /**
      * Delete role
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function delete(): bool
+    public function delete(?object $evidence = null): bool
     {
         if (!$this->id) {
             return false;
         }
 
-        // Remove role from all users
-        $this->userRolesTable->deleteByConditions([Config::getUserRoleColumn('role_id') => $this->id]);
+        return $this->privileged(
+            null,
+            ['operation' => 'role.delete', 'role_id' => $this->id],
+            $evidence,
+            function (): bool {
+                $this->userRolesTable->deleteByConditions([Config::getUserRoleColumn('role_id') => $this->id]);
+                $this->rolePermissionsTable->deleteByConditions([Config::getRolePermissionColumn('role_id') => $this->id]);
 
-        // Remove all permissions from role
-        $this->rolePermissionsTable->deleteByConditions([Config::getRolePermissionColumn('role_id') => $this->id]);
-
-        return $this->rolesTable->delete();
+                return $this->rolesTable->delete();
+            }
+        );
     }
 
     /**
@@ -209,55 +229,71 @@ class Role
     /**
      * Assign role to user
      * @param int $userId
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function assignToUser(int $userId): bool
+    public function assignToUser(int $userId, ?object $evidence = null): bool
     {
         if (!$this->id) {
             return false;
         }
 
-        if ($this->userHasRole($userId)) {
-            return true;
-        }
+        return $this->privileged(
+            $userId,
+            ['operation' => 'role.assign', 'role_id' => $this->id],
+            $evidence,
+            function () use ($userId): bool {
+                if ($this->userHasRole($userId)) {
+                    return true;
+                }
 
-        $result = $this->userRolesTable->insert([
-            Config::getUserRoleColumn('user_id') => $userId,
-            Config::getUserRoleColumn('role_id') => $this->id,
-            Config::getUserRoleColumn('assigned_at') => date('Y-m-d H:i:s')
-        ]);
+                $result = $this->userRolesTable->insert([
+                    Config::getUserRoleColumn('user_id') => $userId,
+                    Config::getUserRoleColumn('role_id') => $this->id,
+                    Config::getUserRoleColumn('assigned_at') => date('Y-m-d H:i:s')
+                ]);
 
-        if ($result) {
-            Kernel::dispatchEvent(new RoleAssignedEvent($userId, (string)$this->getRoleName()));
-        }
+                if ($result) {
+                    Kernel::dispatchEvent(new RoleAssignedEvent($userId, (string)$this->getRoleName()));
+                }
 
-        return $result;
+                return $result;
+            }
+        );
     }
 
     /**
      * Remove role from user
      * @param int $userId
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function removeFromUser(int $userId): bool
+    public function removeFromUser(int $userId, ?object $evidence = null): bool
     {
         if (!$this->id) {
             return false;
         }
 
-        $hadRole = $this->userHasRole($userId);
-        $result = $this->userRolesTable->deleteByConditions([
-            Config::getUserRoleColumn('user_id') => $userId,
-            Config::getUserRoleColumn('role_id') => $this->id
-        ]);
+        return $this->privileged(
+            $userId,
+            ['operation' => 'role.remove', 'role_id' => $this->id],
+            $evidence,
+            function () use ($userId): bool {
+                $hadRole = $this->userHasRole($userId);
+                $result = $this->userRolesTable->deleteByConditions([
+                    Config::getUserRoleColumn('user_id') => $userId,
+                    Config::getUserRoleColumn('role_id') => $this->id
+                ]);
 
-        if ($result && $hadRole) {
-            Kernel::dispatchEvent(new RoleRemovedEvent($userId, (string)$this->getRoleName()));
-        }
+                if ($result && $hadRole) {
+                    Kernel::dispatchEvent(new RoleRemovedEvent($userId, (string)$this->getRoleName()));
+                }
 
-        return $result;
+                return $result;
+            }
+        );
     }
 
     /**
@@ -326,55 +362,70 @@ class Role
     /**
      * Add permission to role
      * @param int $permissionId
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function addPermission(int $permissionId): bool
+    public function addPermission(int $permissionId, ?object $evidence = null): bool
     {
         if (!$this->id) {
             return false;
         }
 
-        // Check if role already has this permission
-        if ($this->hasPermission($permissionId)) {
-            return true;
-        }
+        return $this->privileged(
+            null,
+            ['operation' => 'role.permission.add', 'role_id' => $this->id, 'permission_id' => $permissionId],
+            $evidence,
+            function () use ($permissionId): bool {
+                if ($this->hasPermission($permissionId)) {
+                    return true;
+                }
 
-        $result = $this->rolePermissionsTable->insert([
-            Config::getRolePermissionColumn('role_id') => $this->id,
-            Config::getRolePermissionColumn('permission_id') => $permissionId,
-            Config::getRolePermissionColumn('assigned_at') => date('Y-m-d H:i:s')
-        ]);
+                $result = $this->rolePermissionsTable->insert([
+                    Config::getRolePermissionColumn('role_id') => $this->id,
+                    Config::getRolePermissionColumn('permission_id') => $permissionId,
+                    Config::getRolePermissionColumn('assigned_at') => date('Y-m-d H:i:s')
+                ]);
 
-        if ($result) {
-            Kernel::dispatchEvent(new RolePermissionChangedEvent((int)$this->id, $this->getRoleName()));
-        }
+                if ($result) {
+                    Kernel::dispatchEvent(new RolePermissionChangedEvent((int)$this->id, $this->getRoleName()));
+                }
 
-        return $result;
+                return $result;
+            }
+        );
     }
 
     /**
      * Remove permission from role
      * @param int $permissionId
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function removePermission(int $permissionId): bool
+    public function removePermission(int $permissionId, ?object $evidence = null): bool
     {
         if (!$this->id) {
             return false;
         }
 
-        $result = $this->rolePermissionsTable->deleteByConditions([
-            Config::getRolePermissionColumn('role_id') => $this->id,
-            Config::getRolePermissionColumn('permission_id') => $permissionId
-        ]);
+        return $this->privileged(
+            null,
+            ['operation' => 'role.permission.remove', 'role_id' => $this->id, 'permission_id' => $permissionId],
+            $evidence,
+            function () use ($permissionId): bool {
+                $result = $this->rolePermissionsTable->deleteByConditions([
+                    Config::getRolePermissionColumn('role_id') => $this->id,
+                    Config::getRolePermissionColumn('permission_id') => $permissionId
+                ]);
 
-        if ($result) {
-            Kernel::dispatchEvent(new RolePermissionChangedEvent((int)$this->id, $this->getRoleName()));
-        }
+                if ($result) {
+                    Kernel::dispatchEvent(new RolePermissionChangedEvent((int)$this->id, $this->getRoleName()));
+                }
 
-        return $result;
+                return $result;
+            }
+        );
     }
 
     /**
@@ -411,23 +462,55 @@ class Role
     /**
      * Set permissions for role (replace all)
      * @param array $permissionIds
+     * @param object|null $evidence Application-owned proof verified by the configured policy
      * @return bool
      * @throws DatabaseManagerException
      */
-    public function setPermissions(array $permissionIds): bool
+    public function setPermissions(array $permissionIds, ?object $evidence = null): bool
     {
         if (!$this->id) {
             return false;
         }
 
-        $this->rolePermissionsTable->deleteByConditions([Config::getRolePermissionColumn('role_id') => $this->id]);
-        Kernel::dispatchEvent(new RolePermissionChangedEvent((int)$this->id, $this->getRoleName()));
+        return $this->privileged(
+            null,
+            ['operation' => 'role.permissions.replace', 'role_id' => $this->id],
+            $evidence,
+            function () use ($permissionIds, $evidence): bool {
+                $this->rolePermissionsTable->deleteByConditions([Config::getRolePermissionColumn('role_id') => $this->id]);
+                Kernel::dispatchEvent(new RolePermissionChangedEvent((int)$this->id, $this->getRoleName()));
 
-        foreach ($permissionIds as $permissionId) {
-            $this->addPermission($permissionId);
-        }
+                foreach ($permissionIds as $permissionId) {
+                    $this->addPermission($permissionId, $evidence);
+                }
 
-        return true;
+                return true;
+            }
+        );
+    }
+
+    /**
+     * @template T
+     * @param array<string, mixed> $context
+     * @param callable(): T $callback
+     * @return T
+     */
+    private function privileged(
+        ?int $targetAccountId,
+        array $context,
+        ?object $evidence,
+        callable $callback
+    ): mixed {
+        return PrivilegedOperationGate::execute(
+            new PrivilegedOperation(
+                PrivilegedAction::MANAGE_RBAC,
+                null,
+                $targetAccountId,
+                $context,
+                $evidence
+            ),
+            $callback
+        );
     }
 
     /**
@@ -441,30 +524,4 @@ class Role
         return $role[Config::getRoleTableName()][Config::getRoleColumn('name')] ?? null;
     }
 
-    /**
-     * Get roles table instance
-     * @return Table
-     */
-    public function getRolesTable(): Table
-    {
-        return $this->rolesTable;
-    }
-
-    /**
-     * Get user roles table instance
-     * @return Table
-     */
-    public function getUserRolesTable(): Table
-    {
-        return $this->userRolesTable;
-    }
-
-    /**
-     * Get role permissions table instance
-     * @return Table
-     */
-    public function getRolePermissionsTable(): Table
-    {
-        return $this->rolePermissionsTable;
-    }
 }

@@ -9,7 +9,7 @@ use NimblePHP\Framework\Exception\NimbleException;
  *
  * Thrown by Authorization::login() when a BeforeLoginEvent listener called
  * requireChallenge() (e.g. a 2FA module). The pending state is stored in the
- * session; after verifying the challenge call Authorization::completeChallenge().
+ * session; after verifying the challenge call Authorization::completeChallenge($verifiedEvidence).
  *
  * @package NimblePHP\Authorization\Exceptions
  */

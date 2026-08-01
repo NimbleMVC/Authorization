@@ -8,11 +8,14 @@ use NimblePHP\Authorization\Interfaces\OAuthProvider;
 use NimblePHP\Authorization\Interfaces\PasswordHasher;
 use NimblePHP\Authorization\Hashers\DefaultPasswordHasher;
 use NimblePHP\Authorization\Interfaces\PermissionProvider;
+use NimblePHP\Authorization\Interfaces\PrivilegedOperationPolicy;
 use NimblePHP\Authorization\Interfaces\RateLimiterStorage;
 use NimblePHP\Authorization\Interfaces\TokenProvider;
 use NimblePHP\Authorization\Interfaces\TwoFactorProvider;
 use NimblePHP\Authorization\Interfaces\UnauthorizedHandler;
 use NimblePHP\Authorization\Providers\RbacPermissionProvider;
+use NimblePHP\Authorization\Policies\DenyAllPrivilegedOperationPolicy;
+use NimblePHP\Authorization\Services\PrivilegedOperationGate;
 use NimblePHP\Authorization\Storages\DatabaseRateLimiterStorage;
 use NimblePHP\Authorization\Storages\SessionRateLimiterStorage;
 
@@ -139,6 +142,11 @@ class Config
      * @var PermissionProvider|null
      */
     private static ?PermissionProvider $permissionProvider = null;
+
+    /**
+     * Mandatory boundary for high-trust operations. Defaults to deny-all.
+     */
+    private static ?PrivilegedOperationPolicy $privilegedOperationPolicy = null;
 
     // ===== Password Hashing Configuration =====
 
@@ -400,6 +408,36 @@ class Config
         }
 
         return self::$permissionProvider;
+    }
+
+    /**
+     * Set the application-owned policy for privileged operations.
+     */
+    public static function setPrivilegedOperationPolicy(PrivilegedOperationPolicy $policy): void
+    {
+        self::$privilegedOperationPolicy = $policy;
+        PrivilegedOperationGate::reset();
+    }
+
+    /**
+     * Get the privileged-operation policy. The unconfigured default denies all.
+     */
+    public static function getPrivilegedOperationPolicy(): PrivilegedOperationPolicy
+    {
+        if (self::$privilegedOperationPolicy === null) {
+            self::$privilegedOperationPolicy = new DenyAllPrivilegedOperationPolicy();
+        }
+
+        return self::$privilegedOperationPolicy;
+    }
+
+    /**
+     * Restore the fail-closed default, useful for long-lived workers and tests.
+     */
+    public static function resetPrivilegedOperationPolicy(): void
+    {
+        self::$privilegedOperationPolicy = null;
+        PrivilegedOperationGate::reset();
     }
 
     /**

@@ -12,9 +12,11 @@ use krzysztofzylka\DatabaseManager\Table;
 use NimblePHP\Authorization\Account;
 use NimblePHP\Authorization\Authorization;
 use NimblePHP\Authorization\Config;
+use NimblePHP\Authorization\Exceptions\PrivilegedOperationDeniedException;
 use NimblePHP\Authorization\Interfaces\TokenProvider;
 use NimblePHP\Authorization\OAuth\OAuthIdentity;
 use NimblePHP\Authorization\Providers\JWTProvider;
+use NimblePHP\Authorization\Policies\CallbackPrivilegedOperationPolicy;
 use NimblePHP\Authorization\Exceptions\ValidationException;
 use NimblePHP\Framework\Kernel;
 use NimblePHP\Framework\Cookie;
@@ -65,6 +67,9 @@ final class AuthorizationAccountStateTest extends TestCase
         Config::$rateLimitEnabled = false;
         Config::$rememberMeEnabled = true;
         Config::$rememberMeTableName = 'account_remember_tokens';
+        Config::setPrivilegedOperationPolicy(new CallbackPrivilegedOperationPolicy(
+            static fn(): bool => true
+        ));
 
         $this->pdo->exec(<<<'SQL'
             CREATE TABLE user (
@@ -131,6 +136,23 @@ final class AuthorizationAccountStateTest extends TestCase
                 date_modify TEXT NULL
             )
             SQL);
+        $this->pdo->exec(<<<'SQL'
+            CREATE TABLE account_roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role TEXT NOT NULL UNIQUE,
+                description TEXT NULL,
+                date_created TEXT NOT NULL
+            )
+            SQL);
+        $this->pdo->exec(<<<'SQL'
+            CREATE TABLE account_user_roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                date_assigned TEXT NOT NULL,
+                UNIQUE (account_id, role_id)
+            )
+            SQL);
 
         $this->authorization = $this->authorizationWithoutConstructor();
     }
@@ -152,6 +174,7 @@ final class AuthorizationAccountStateTest extends TestCase
         Config::$rateLimitEnabled = true;
         Config::$rememberMeEnabled = false;
         Config::$rememberMeTableName = 'account_remember_tokens';
+        Config::resetPrivilegedOperationPolicy();
     }
 
     public function testExistingSessionIsRejectedAndClearedAfterAccountDeactivation(): void
@@ -190,6 +213,25 @@ final class AuthorizationAccountStateTest extends TestCase
 
         self::assertFalse($this->authorization->authenticateAs(1));
         self::assertArrayNotHasKey('account_id', $_SESSION);
+    }
+
+    public function testAuthenticatedAccountCannotAssignItselfRoleWithoutPolicyApproval(): void
+    {
+        $this->insertAccount();
+        $this->pdo->exec(
+            "INSERT INTO account_roles (role, description, date_created) VALUES ('admin', 'Administrator', datetime('now'))"
+        );
+        $_SESSION[Config::$sessionKey] = 1;
+        $_SESSION[self::EPOCH_SESSION_KEY] = 0;
+        Config::resetPrivilegedOperationPolicy();
+
+        try {
+            $this->authorization->assignRole('admin');
+            self::fail('Self-escalation should require explicit policy approval');
+        } catch (PrivilegedOperationDeniedException) {
+            self::assertSame(0, $this->tableCount('account_user_roles'));
+            self::assertTrue($this->authorization->isAuthorized());
+        }
     }
 
     public function testPasswordLoginRejectsInactiveAccountEvenWhenActivationIsNotRequired(): void
