@@ -28,9 +28,9 @@ Dwuetapowa weryfikacja dodaje dodatkową warstwę bezpieczeństwa. Po wprowadzen
 
 #### Email
 - **Co to?** Kody wysyłane na adres email
-- **Bezpieczeństwo:** ⭐⭐⭐⭐ (Wysokie)
-- **Niezawodność:** ⭐⭐⭐ (Zależy od dostawcy email)
-- **UX:** ⭐⭐⭐⭐⭐ (Nie wymaga aplikacji)
+- **Status:** building block, nie kompletny przepływ `Authorization::login()`
+- **Magazyn:** pamięć obiektu; kod nie jest współdzielony między workerami
+- **Produkcja:** wymaga własnego trwałego magazynu i integracji wysyłki/weryfikacji
 
 ## Konfiguracja
 
@@ -48,7 +48,8 @@ Config::registerTwoFactorProvider(
     // Parametry: (issuer, codeLength, timeStep)
 );
 
-// Zarejestruj Email provider
+// EmailProvider nie jest automatycznie używany przez Authorization::login().
+// To niskopoziomowy przykład wymagający własnej integracji i trwałego storage.
 $emailProvider = new EmailProvider(6, 600); // 6-cyfrowy kod, ważny 10 minut
 $emailProvider->setEmailCallback(function($email, $code) {
     // Implementuj wysyłanie emaila
@@ -73,6 +74,11 @@ Config::$twoFactorColumns = [
     'provider' => 'custom_2fa_provider',
 ];
 ```
+
+Sekret TOTP musi być odzyskiwalny, ponieważ provider potrzebuje go przy każdej
+weryfikacji. Moduł zapisuje go w tej kolumnie bez hashowania i bez własnego
+szyfrowania. W produkcji zapewnij szyfrowanie kolumny/bazy oraz ścisłą kontrolę
+dostępu; hash jednokierunkowy nie może zastąpić szyfrowania sekretu TOTP.
 
 ## TOTP (Google Authenticator)
 
@@ -207,7 +213,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 ## Email 2FA
 
-### Konfiguracja sendowania emaila
+`EmailProvider` jest wyłącznie niskopoziomowym przykładem generowania i
+sprawdzania kodu. Przechowuje kody w pamięci konkretnego obiektu, a
+`Authorization::verifyTwoFactorCode()` nie uruchamia kompletnego przepływu
+emailowego. Nie używaj tej implementacji jako gotowej granicy uwierzytelniania.
+
+### Konfiguracja wysyłania e-maila
 
 ```php
 use NimblePHP\Authorization\Providers\EmailProvider;
@@ -235,38 +246,26 @@ $emailProvider->setEmailCallback(function($email, $code) {
 Config::registerTwoFactorProvider('email', $emailProvider);
 ```
 
-### Wysłanie kodu na email
+Samo zarejestrowanie providera nie podłącza go do `Authorization::login()`.
+
+### Użycie niskopoziomowego providera
+
+Poniższy fragment pokazuje wyłącznie API obiektu. Generowanie i weryfikacja
+muszą użyć tej samej instancji w tym samym procesie:
 
 ```php
-use NimblePHP\Authorization\Config;
+$accountEmail = $account->getEmail(); // Tożsamość ustalona po stronie serwera.
+$emailProvider->generateCode($accountEmail);
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $email = $_POST['email'] ?? null;
-    
-    if ($email) {
-        $emailProvider = Config::getTwoFactorProvider('email');
-        $code = $emailProvider->generateCode($email);
-        
-        // Kod został wysłany via callback
-        echo "Kod weryfikacyjny został wysłany na adres $email";
-    }
-}
+// W tej samej instancji obiektu:
+$verified = $emailProvider->verify($accountEmail, $submittedCode);
 ```
 
-### Weryfikacja kodu email
-
-Podobnie jak TOTP, ale używasz email provider:
-
-```php
-try {
-    $verified = $auth->verifyTwoFactorCode($_POST['2fa_code']);
-    if ($verified) {
-        echo "Zalogowano!";
-    }
-} catch (TwoFactorException $e) {
-    echo "Nieprawidłowy kod: " . $e->getMessage();
-}
-```
+W aplikacji HTTP potrzebujesz trwałego, współdzielonego magazynu z hashem kodu,
+czasem wygaśnięcia, atomowym zużyciem i limitem prób. Adres e-mail musi wynikać
+z serwerowo powiązanego pending konta, nie z dowolnej wartości przesłanej przez
+klienta. Dopiero własna integracja może po udanej weryfikacji bezpiecznie
+zakończyć logowanie.
 
 ## Przepływ logowania
 
@@ -414,17 +413,45 @@ $recoveryCodes = $auth->regenerateRecoveryCodes();
 ### Najlepsze praktyki
 
 #### 1. Szanuj rate limiting
+
+Wbudowany limiter chroni wyłącznie `Authorization::login()` (pierwszy
+składnik). `verifyTwoFactorCode()` nie sprawdza ani nie zwiększa jego licznika,
+a pending state 2FA nie ma obecnie własnego TTL. Dodaj osobny limiter przed
+wywołaniem weryfikacji, przykładowo:
+
 ```php
-// Nie wyłączaj rate limitingu dla logowania z 2FA
-Config::$rateLimitEnabled = true;
-Config::$rateLimitMaxAttempts = 5;
+use NimblePHP\Authorization\RateLimiter;
+
+$pendingAccountId = $auth->getPendingTwoFactorUserId();
+
+if ($pendingAccountId === null) {
+    http_response_code(401);
+    exit;
+}
+
+$limitKey = '2fa:' . $pendingAccountId;
+$limiter = new RateLimiter();
+
+if ($limiter->isRateLimited($limitKey)) {
+    http_response_code(429);
+    exit;
+}
+
+try {
+    $auth->verifyTwoFactorCode($_POST['2fa_code']);
+    $limiter->clearAttempts($limitKey);
+} catch (TwoFactorException $exception) {
+    $limiter->recordFailedAttempt($limitKey);
+    throw $exception;
+}
 ```
 
 #### 2. Przechowuj sekrety bezpiecznie
 ```php
-// DOBRZE - sekret jest hashowany
-// ŹLE - przechowywanie na kliencie
-echo $secret; // ✗ Nie rób tego!
+// TOTP wymaga odzyskania sekretu: użyj szyfrowania at-rest, nie hasha.
+// Pokazuj secret/QR tylko w kontrolowanym kroku enrollmentu; nie loguj go.
+$result = $auth->enableTwoFactorAuth($totp);
+showEnrollmentOnce($result['qr_code'], $result['secret']);
 ```
 
 #### 3. Używaj HTTPS
@@ -452,18 +479,13 @@ if ($auth->isAuthorized()) {
 }
 ```
 
-### Chroniące przed atakami
+### Zabezpieczenia wymagane w aplikacji
 
 #### Brute Force
-- Rate limiting na weryfikację 2FA
-- Blokowanie po N nieudanych próbach
-- Logarytmiczne opóźnienia między próbami
-
-```php
-// Implementuj opóźnienie
-$emailProvider = new EmailProvider(6, 600);
-$emailProvider->maxAttempts = 5; // Blokuj po 5 próbach
-```
+- moduł nie ma wbudowanego limitu prób `verifyTwoFactorCode()`;
+- aplikacja musi dodać limit per pending konto/sesja i opcjonalnie IP;
+- aplikacja powinna nadać pending state krótki TTL i unieważniać go po limicie;
+- opóźnienia i blokady muszą być zaimplementowane poza providerem.
 
 #### Man-in-the-Middle
 - Zawsze używaj HTTPS
@@ -494,14 +516,11 @@ CREATE TABLE two_factor_audit (
 
 ### Problem: Kody się nie zgadzają
 
-**Przyczyna:** Zegar serwera i urządzenia użytkownika są zsynchronizowane
+**Przyczyna:** Zegar serwera lub urządzenia użytkownika nie jest zsynchronizowany.
 
-**Rozwiązanie:**
-```php
-// Zwiększ tolerancję czasową
-$totp = new TOTPProvider();
-$totp->discrepancy = 2; // Zamiast 1
-```
+**Rozwiązanie:** zsynchronizuj zegary przez NTP. Provider akceptuje na stałe
+bieżące okno oraz po jednym oknie przed i po nim; nie udostępnia publicznego
+settera `discrepancy`.
 
 ### Problem: Kod 2FA trwa zbyt długo
 
@@ -511,6 +530,10 @@ $totp->discrepancy = 2; // Zamiast 1
 ```php
 $emailProvider = new EmailProvider(6, 1800); // 30 minut
 ```
+
+Ta konfiguracja dotyczy wyłącznie pamięciowego `EmailProvider`; nie podłącza
+go do standardowego przepływu logowania i nie zapewnia współdzielenia kodu
+między żądaniami lub workerami.
 
 ### Problem: Nie mogę wysłać emaila
 

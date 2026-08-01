@@ -15,7 +15,8 @@ Przewodnik implementacji JWT (JSON Web Tokens) i API Keys dla staeless token-bas
    - [Konfiguracja API Keys](#konfiguracja-api-keys)
    - [Generowanie API Keys](#generowanie-api-keys)
    - [Zarządzanie API Keys](#zarządzanie-api-keys)
-   - [Rate Limiting API Keys](#rate-limiting-api-keys)
+   - [Egzekwowanie scopes](#egzekwowanie-scopes)
+   - [Liczniki użycia API Keys](#liczniki-użycia-api-keys)
 
 3. [Autentykacja HTTP](#autentykacja-http)
 4. [Best Practices](#best-practices)
@@ -284,9 +285,11 @@ class APIKeysController
         
         try {
             $apiKey = $auth->generateToken($userId, 'api_key', [
-                'name' => $_POST['name'] ?? 'New API Key',
-                'scopes' => $_POST['scopes'] ?? [],
-                'rate_limit' => $_POST['rate_limit'] ?? 1000
+                'name' => $validatedName,
+                // Wartości z serwerowego allowlistu/planu konta,
+                // a nie surowe parametry żądania.
+                'scopes' => $allowedScopes,
+                'rate_limit' => $allowedRateLimit
             ], 
             365 * 24 * 3600); // 1 year expiration
             
@@ -310,6 +313,10 @@ sk_abcdef1234567890abcdef1234567890abcdef123456789012345678
 ```
 
 Prefiks `sk_` oznacza "secret key".
+
+`scopes` i `rate_limit` są zapisywanymi metadanymi. `APIKeyProvider` zwraca je
+po walidacji, ale sam nie sprawdza wymaganego scope i nie blokuje żądania po
+przekroczeniu limitu. Te decyzje muszą zostać wykonane przez aplikację.
 
 ### Zarządzanie API Keys
 
@@ -386,9 +393,26 @@ if ($auth->revokeToken($apiKey, 'api_key')) {
 }
 ```
 
-### Rate Limiting API Keys
+### Egzekwowanie scopes
 
-Każdy klucz API ma limit żądań (domyślnie 1000 żądań/godzina):
+Po centralnej walidacji aplikacja musi sprawdzić scope wymagany przez endpoint:
+
+```php
+$keyData = $auth->validateToken($apiKey, 'api_key');
+
+if (!in_array('write:posts', $keyData['scopes'], true)) {
+    http_response_code(403);
+    exit;
+}
+```
+
+Moduł nie mapuje routingu na scopes i nie dostarcza middleware wykonującego tę
+decyzję.
+
+### Liczniki użycia API Keys
+
+Każdy klucz może przechowywać wartość `rate_limit`. `getRateLimit()` raportuje
+liczbę rekordów użycia z ostatniej godziny:
 
 ```php
 $provider = $auth->getTokenProvider('api_key');
@@ -400,39 +424,29 @@ echo 'Used: ' . $rateLimit['used'];          // 234
 echo 'Remaining: ' . $rateLimit['remaining']; // 766
 ```
 
-#### Implementacja rate limiting w middleware
+Wywołanie `getRateLimit()` samo waliduje klucz i rejestruje użycie, ale nie
+odrzuca żądania. Liczenie nie jest atomowym mechanizmem `consume`, więc przy
+równoległych żądaniach nie stanowi samodzielnej granicy rate limitu.
+
+#### Wymagany limiter aplikacyjny
+
+Do egzekwowania użyj atomowego limitera aplikacji/Redis po centralnej walidacji:
 
 ```php
-<?php
+$keyData = $auth->validateToken($apiKey, 'api_key');
+$limiterKey = 'api-key:' . hash('sha256', $apiKey);
 
-class APIRateLimitMiddleware
-{
-    public function handle()
-    {
-        $auth = new Authorization();
-        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-        
-        if (preg_match('/Bearer\s+(.+)$/i', $authHeader, $matches)) {
-            $token = $matches[1];
-            $provider = $auth->getTokenProvider('api_key');
-            
-            $rateLimit = $provider->getRateLimit($token);
-            
-            if ($rateLimit['remaining'] <= 0) {
-                http_response_code(429);
-                echo json_encode([
-                    'error' => 'Rate limit exceeded',
-                    'retry_after' => 3600
-                ]);
-                exit;
-            }
-            
-            // Dodaj informacje o rate limit do headera
-            header('X-RateLimit-Limit: ' . $rateLimit['limit']);
-            header('X-RateLimit-Used: ' . $rateLimit['used']);
-            header('X-RateLimit-Remaining: ' . $rateLimit['remaining']);
-        }
-    }
+// ApplicationApiKeyLimiter musi wykonywać atomowe consume.
+$decision = $apiKeyLimiter->consume(
+    $limiterKey,
+    (int)$keyData['rate_limit'],
+    windowSeconds: 3600,
+);
+
+if (!$decision->allowed) {
+    http_response_code(429);
+    header('Retry-After: ' . $decision->retryAfter);
+    exit;
 }
 ```
 
@@ -514,12 +528,12 @@ if (!empty($apiKey)) {
    - Ustaw daty wygaśnięcia
 
 3. **Scopes**
-   - Implementuj scopes dla granularnej kontroli dostępu
+   - Provider tylko przechowuje scopes; aplikacja musi je egzekwować dla każdego endpointu
    - Ograniczaj uprawnienia do minimum
    - Loguj operacje wykonane kluczem
 
 4. **Rate Limiting**
-   - Ustaw rozumne limity żądań
+   - Pole `rate_limit` nie blokuje ruchu; użyj atomowego limitera aplikacyjnego
    - Monitoruj anomalną aktywność
    - Zautomatyzuj blokowanie nadużywanych kluczy
 
@@ -571,6 +585,10 @@ try {
 ```
 
 ### Rate Limit Exceeded
+
+`APIKeyProvider` sam nie rzuca wyjątku rate limitu. Jeśli aplikacja korzysta
+z diagnostycznego `getRateLimit()`, musi jawnie podjąć decyzję 429; dla
+ścisłego limitu użyj osobnego atomowego limitera opisanego wyżej.
 
 **Rozwiązanie:**
 ```php

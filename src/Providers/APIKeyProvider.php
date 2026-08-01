@@ -13,9 +13,9 @@ use NimblePHP\Framework\Translation\Translation;
  * API Keys provider for stateful token-based authentication
  *
  * Generates and validates API keys with:
- * - Rate limiting per key
+ * - Usage logging and rate-limit metadata (enforcement belongs to the application)
  * - Named keys for identification
- * - Scopes for permission control
+ * - Scope metadata (permission enforcement belongs to the application)
  * - Expiration and revocation support
  */
 class APIKeyProvider implements TokenProvider, AccountTokenRevoker
@@ -328,7 +328,9 @@ class APIKeyProvider implements TokenProvider, AccountTokenRevoker
     }
 
     /**
-     * Check API key rate limit
+     * Report API key usage against its configured limit.
+     *
+     * This method does not block requests; callers must enforce the result.
      *
      * @param string $token API key
      * @return array Rate limit info
