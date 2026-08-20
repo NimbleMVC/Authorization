@@ -45,6 +45,8 @@
         "apikey_not_found": "Klucz API nie znaleziony lub nieprawidłowy",
         "apikey_inactive": "Klucz API jest nieaktywny",
         "apikey_expired": "Klucz API wygasł",
+        "apikey_rate_limited": "Przekroczono limit żądań dla klucza API",
+        "apikey_scope_missing": "Klucz API nie posiada wymaganego scope",
         "permission_name_empty": "Nazwa uprawnienia nie może być pusta",
         "permission_already_exists": "Uprawnienie już istnieje",
         "role_name_empty": "Nazwa roli nie może być pusta",

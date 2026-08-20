@@ -256,7 +256,10 @@ Migracja dodaje 3 tabele:
 - `account_token_blacklist` - czarna lista tokenów
 
 Migracja `1784369500` dodaje również `auth_epoch` do tabeli kont i
-`account_api_keys`. Przy własnym schemacie obie kolumny są obowiązkowe.
+`account_api_keys`. Migracja `1787208000` dodaje `rate_window_started_at` i
+`rate_window_count` do `account_api_keys` (atomowe egzekwowanie rate limitu -
+patrz [Wymagania migracyjne](#wymagania-migracyjne)). Przy własnym schemacie
+wszystkie te kolumny są obowiązkowe.
 
 ```php
 // Uruchom migracje
@@ -314,9 +317,11 @@ sk_abcdef1234567890abcdef1234567890abcdef123456789012345678
 
 Prefiks `sk_` oznacza "secret key".
 
-`scopes` i `rate_limit` są zapisywanymi metadanymi. `APIKeyProvider` zwraca je
-po walidacji, ale sam nie sprawdza wymaganego scope i nie blokuje żądania po
-przekroczeniu limitu. Te decyzje muszą zostać wykonane przez aplikację.
+`rate_limit` jest egzekwowany atomowo przez `APIKeyProvider::validateToken()`
+(okno 1h) - klucz po przekroczeniu limitu jest odrzucany wyjątkiem
+`RateLimitExceededException`. `scopes` pozostaje metadaną: `APIKeyProvider`
+zwraca je po walidacji, ale sam nie wie, jakiego scope wymaga dany endpoint -
+aplikacja musi to sprawdzić przez `hasScope()`/`requireScope()` (patrz niżej).
 
 ### Zarządzanie API Keys
 
@@ -395,24 +400,57 @@ if ($auth->revokeToken($apiKey, 'api_key')) {
 
 ### Egzekwowanie scopes
 
-Po centralnej walidacji aplikacja musi sprawdzić scope wymagany przez endpoint:
+Moduł nie mapuje routingu na scopes - nie wie, jakiego scope wymaga dany
+endpoint. Po centralnej walidacji aplikacja musi sprawdzić scope wymagany
+przez endpoint, używając `hasScope()`/`requireScope()` z `APIKeyProvider`:
 
 ```php
+$provider = $auth->getTokenProvider('api_key');
 $keyData = $auth->validateToken($apiKey, 'api_key');
 
-if (!in_array('write:posts', $keyData['scopes'], true)) {
+try {
+    $provider->requireScope($keyData, 'write:posts');
+} catch (\NimblePHP\Authorization\Exceptions\InsufficientScopeException $e) {
     http_response_code(403);
+    exit;
+}
+
+// lub, dla logiki warunkowej bez wyjątku:
+if ($provider->hasScope($keyData, 'write:posts')) {
+    // ...
+}
+```
+
+`requireScope()` przyjmuje też tablicę scopes (wszystkie muszą być obecne).
+
+### Liczniki użycia i rate limit API Keys
+
+Każdy klucz przechowuje wartość `rate_limit` (żądań na godzinę). Jest ona
+egzekwowana atomowo wewnątrz `APIKeyProvider::validateToken()` - pojedynczy
+warunkowy `UPDATE` sprawdza okno i limit razem z inkrementacją, więc równoległe
+żądania nie mogą wyścigowo ominąć limitu. Po przekroczeniu limitu
+`validateToken()`/`Authorization::validateToken()` rzuca
+`RateLimitExceededException` (kod 429) i żądanie nie jest uwierzytelniane:
+
+```php
+use NimblePHP\Authorization\Exceptions\RateLimitExceededException;
+
+try {
+    $keyData = $auth->validateToken($apiKey, 'api_key');
+} catch (RateLimitExceededException $e) {
+    http_response_code(429);
+    header('Retry-After: 3600');
+    exit;
+} catch (Exception $e) {
+    http_response_code(401);
     exit;
 }
 ```
 
-Moduł nie mapuje routingu na scopes i nie dostarcza middleware wykonującego tę
-decyzję.
-
-### Liczniki użycia API Keys
-
-Każdy klucz może przechowywać wartość `rate_limit`. `getRateLimit()` raportuje
-liczbę rekordów użycia z ostatniej godziny:
+`getRateLimit()` pozostaje diagnostycznym, tylko-do-odczytu raportem stanu
+bieżącego okna - w przeciwieństwie do `validateToken()` nie zużywa żądania
+z limitu i nie rzuca wyjątku, więc można go bezpiecznie wywołać także po
+odrzuceniu żądania (np. by odczytać `remaining` do treści odpowiedzi 429):
 
 ```php
 $provider = $auth->getTokenProvider('api_key');
@@ -424,31 +462,20 @@ echo 'Used: ' . $rateLimit['used'];          // 234
 echo 'Remaining: ' . $rateLimit['remaining']; // 766
 ```
 
-Wywołanie `getRateLimit()` samo waliduje klucz i rejestruje użycie, ale nie
-odrzuca żądania. Liczenie nie jest atomowym mechanizmem `consume`, więc przy
-równoległych żądaniach nie stanowi samodzielnej granicy rate limitu.
+#### Wyłączenie wbudowanego egzekwowania
 
-#### Wymagany limiter aplikacyjny
+Jeśli aplikacja ma już własny atomowy limiter (np. Redis) i chce go zachować
+zamiast wbudowanego, ustaw `Config::$apiKeyRateLimitEnforced = false`
+(`AUTHORIZATION_API_KEY_RATE_LIMIT_ENFORCED=false`). `scopes` pozostaje
+zawsze wyłącznie decyzją aplikacji.
 
-Do egzekwowania użyj atomowego limitera aplikacji/Redis po centralnej walidacji:
+#### Wymagania migracyjne
 
-```php
-$keyData = $auth->validateToken($apiKey, 'api_key');
-$limiterKey = 'api-key:' . hash('sha256', $apiKey);
-
-// ApplicationApiKeyLimiter musi wykonywać atomowe consume.
-$decision = $apiKeyLimiter->consume(
-    $limiterKey,
-    (int)$keyData['rate_limit'],
-    windowSeconds: 3600,
-);
-
-if (!$decision->allowed) {
-    http_response_code(429);
-    header('Retry-After: ' . $decision->retryAfter);
-    exit;
-}
-```
+Migracja `1787208000` dodaje do `account_api_keys` kolumny
+`rate_window_started_at` i `rate_window_count`, potrzebne do atomowego
+egzekwowania. Uruchom migracje przed wdrożeniem; przy własnym schemacie obie
+kolumny są obowiązkowe, gdy `Config::$apiKeyRateLimitEnforced` pozostaje `true`
+(domyślnie).
 
 ## Autentykacja HTTP
 
@@ -528,12 +555,15 @@ if (!empty($apiKey)) {
    - Ustaw daty wygaśnięcia
 
 3. **Scopes**
-   - Provider tylko przechowuje scopes; aplikacja musi je egzekwować dla każdego endpointu
+   - Provider przechowuje scopes; aplikacja musi je egzekwować dla każdego
+     endpointu przez `hasScope()`/`requireScope()` (moduł nie zna mapowania
+     endpoint -> scope)
    - Ograniczaj uprawnienia do minimum
    - Loguj operacje wykonane kluczem
 
 4. **Rate Limiting**
-   - Pole `rate_limit` nie blokuje ruchu; użyj atomowego limitera aplikacyjnego
+   - Pole `rate_limit` jest egzekwowane atomowo przez `validateToken()`
+     (`Config::$apiKeyRateLimitEnforced`, domyślnie włączone)
    - Monitoruj anomalną aktywność
    - Zautomatyzuj blokowanie nadużywanych kluczy
 
@@ -586,16 +616,16 @@ try {
 
 ### Rate Limit Exceeded
 
-`APIKeyProvider` sam nie rzuca wyjątku rate limitu. Jeśli aplikacja korzysta
-z diagnostycznego `getRateLimit()`, musi jawnie podjąć decyzję 429; dla
-ścisłego limitu użyj osobnego atomowego limitera opisanego wyżej.
+`APIKeyProvider::validateToken()` rzuca `RateLimitExceededException` (kod 429),
+gdy klucz przekroczył swój `rate_limit` w bieżącym oknie (1h).
 
 **Rozwiązanie:**
 ```php
-$provider = $auth->getTokenProvider('api_key');
-$rateLimit = $provider->getRateLimit($apiKey);
+use NimblePHP\Authorization\Exceptions\RateLimitExceededException;
 
-if ($rateLimit['remaining'] == 0) {
+try {
+    $auth->validateToken($apiKey, 'api_key');
+} catch (RateLimitExceededException $e) {
     http_response_code(429);
     header('Retry-After: 3600');
     echo 'Rate limit exceeded. Try again in 1 hour.';
