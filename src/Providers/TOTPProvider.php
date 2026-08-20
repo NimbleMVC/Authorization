@@ -11,7 +11,9 @@ use NimblePHP\Authorization\Interfaces\TwoFactorProvider;
  * Compatible with authenticator apps like Google Authenticator, Microsoft Authenticator,
  * Authy, and others.
  *
- * Generates QR codes that users can scan to add accounts to their authenticator app.
+ * Produces the standard otpauth:// enrollment URI (getQRCodeURI()) for the
+ * application to render into a QR code locally. This class makes no network
+ * calls - it never sends the secret to a third-party QR rendering service.
  */
 class TOTPProvider implements TwoFactorProvider
 {
@@ -158,26 +160,6 @@ class TOTPProvider implements TwoFactorProvider
 
         $query = http_build_query($params);
         return "otpauth://totp/{$label}?{$query}";
-    }
-
-    /**
-     * Generate a QR code image URL using a QR code generation service
-     *
-     * Uses Google Charts API for generating QR codes. You can replace this
-     * with your preferred QR code generator.
-     *
-     * @param string $secret The TOTP secret
-     * @param string $accountName User identifier (email or username)
-     * @param int $size QR code size in pixels (default: 300)
-     * @param string|null $issuer Custom issuer name
-     * @return string URL to QR code image
-     */
-    public function getQRCodeImageURL(string $secret, string $accountName, int $size = 300, ?string $issuer = null): string
-    {
-        $uri = $this->getQRCodeURI($secret, $accountName, $issuer);
-        $encodedURI = rawurlencode($uri);
-
-        return "https://chart.googleapis.com/chart?chs={$size}x{$size}&chld=M|0&cht=qr&chl={$encodedURI}";
     }
 
     /**

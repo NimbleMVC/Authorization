@@ -626,8 +626,13 @@ class Authorization
     /**
      * Enable 2FA for the currently authenticated user
      *
+     * This does not return a QR code image or URL: rendering one via a
+     * third-party service would leak the secret to that service (see
+     * AUT-H07). If $provider exposes getQRCodeURI() (TOTPProvider does),
+     * call it and render the returned otpauth:// URI into a QR code locally.
+     *
      * @param TwoFactorProvider $provider The 2FA provider to use
-     * @return array{secret: string, provider: string, qr_code: ?string, recovery_codes: array<int, string>}
+     * @return array{secret: string, provider: string, recovery_codes: array<int, string>}
      * @throws InvalidArgumentException If user not authenticated
      * @throws DatabaseManagerException
      */
@@ -647,7 +652,6 @@ class Authorization
         $result = [
             'secret' => $secret,
             'provider' => $provider->getName(),
-            'qr_code' => null,
             'recovery_codes' => [],
         ];
 
@@ -657,16 +661,6 @@ class Authorization
             $result['recovery_codes'] = $this->recoveryCodeService->replaceForAccount($userId, $generatedCodes);
         } else {
             $this->recoveryCodeService->invalidateForAccount($userId);
-        }
-
-        // Generate QR code for TOTP provider
-        if (method_exists($provider, 'getQRCodeImageURL')) {
-            $user = $this->account->find([Config::getColumn('id') => $userId]);
-            $userIdentifier = Config::isEmailAuth()
-                ? $user[Config::$tableName][Config::getColumn('email')]
-                : $user[Config::$tableName][Config::getColumn('username')];
-
-            $result['qr_code'] = $provider->getQRCodeImageURL($secret, $userIdentifier);
         }
 
         return $result;

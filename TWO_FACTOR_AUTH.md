@@ -103,24 +103,23 @@ $result = $auth->enableTwoFactorAuth($totp);
 // Zwracane dane:
 // - secret: String - Sekret (przechowywany już w BD)
 // - provider: String - Nazwa dostawcy ('totp')
-// - qr_code: String - URL do QR kodu
+// - recovery_codes: string[] - Kody zapasowe (pokazywane tylko raz)
 
-// Wyświetl QR kod
-echo "<img src='{$result['qr_code']}' alt='2FA QR Code'>";
+// AUT-H07: enableTwoFactorAuth() celowo NIE zwraca obrazu/URL-a QR kodu.
+// Renderowanie QR przez zewnętrzną usługę (np. dawne Google Charts) wysyła
+// jej pełny otpauth:// URI, czyli sekret TOTP w query stringu - to
+// unieważnia wartość drugiego składnika. QR trzeba wygenerować lokalnie
+// (patrz niżej) z $totp->getQRCodeURI($result['secret'], 'user@example.com').
 echo "Sekret: {$result['secret']}";
 ```
 
 ### Wyświetlanie QR kodu
 
-QR kod można wyświetlić na kilka sposobów:
+QR kod trzeba wygenerować **lokalnie** - `getQRCodeURI()` zwraca standardowe
+`otpauth://` URI bez żadnego wywołania sieciowego; nigdy nie przekazuj go do
+zewnętrznej usługi renderującej QR (patrz AUT-H07 wyżej).
 
-#### 1. Obraz z Google Charts (domyślnie)
-```php
-$qrCodeUrl = $totp->getQRCodeImageURL($secret, 'user@example.com');
-echo "<img src='$qrCodeUrl' alt='QR Code'>";
-```
-
-#### 2. Wygenerowanie własnego QR kodu
+#### Wygenerowanie własnego QR kodu
 Możesz użyć biblioteki takiej jak `bacon/bacon-qr-code`:
 
 ```bash
@@ -450,8 +449,11 @@ try {
 ```php
 // TOTP wymaga odzyskania sekretu: użyj szyfrowania at-rest, nie hasha.
 // Pokazuj secret/QR tylko w kontrolowanym kroku enrollmentu; nie loguj go.
+// QR generuj lokalnie z getQRCodeURI() (patrz AUT-H07) - nigdy przez
+// zewnętrzną usługę renderującą.
 $result = $auth->enableTwoFactorAuth($totp);
-showEnrollmentOnce($result['qr_code'], $result['secret']);
+$qrUri = $totp->getQRCodeURI($result['secret'], $userIdentifier);
+showEnrollmentOnce($qrUri, $result['secret']);
 ```
 
 #### 3. Używaj HTTPS
@@ -574,8 +576,7 @@ $emailProvider->setEmailCallback(function($email, $code) {
 - `verify(string $secret, string $code): bool`
 - `isCodeValid(string $secret, string $code): bool`
 - `getName(): string` → `'totp'`
-- `getQRCodeURI(string $secret, string $accountName, ?string $issuer = null): string`
-- `getQRCodeImageURL(string $secret, string $accountName, int $size = 300, ?string $issuer = null): string`
+- `getQRCodeURI(string $secret, string $accountName, ?string $issuer = null): string` — lokalne `otpauth://` URI; renderuj QR z tego lokalnie (patrz AUT-H07). `getQRCodeImageURL()` (Google Charts) zostało usunięte w AUT-H07 - wysyłało sekret do zewnętrznej usługi.
 - `getRecoveryCodes(string $secret, int $count = 10): array`
 - `verifyRecoveryCode(string $secret, string $code): bool` — przestarzałe; zawsze `false`, ponieważ bez konta i magazynu nie da się bezpiecznie zweryfikować kodu
 

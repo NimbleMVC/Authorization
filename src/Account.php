@@ -638,13 +638,10 @@ class Account
             return false;
         }
 
-        return $this->account->updateByConditions(
-            [
-                Config::getTwoFactorSecretColumn() => $secret,
-                Config::getTwoFactorProviderColumn() => $provider,
-            ],
-            [Config::getColumn('id') => $userId]
-        );
+        return $this->account->setId($userId)->update([
+            Config::getTwoFactorSecretColumn() => $secret,
+            Config::getTwoFactorProviderColumn() => $provider,
+        ]);
     }
 
     /**
@@ -662,13 +659,10 @@ class Account
             return false;
         }
 
-        return $this->account->updateByConditions(
-            [
-                Config::getTwoFactorSecretColumn() => null,
-                Config::getTwoFactorProviderColumn() => null,
-            ],
-            [Config::getColumn('id') => $userId]
-        );
+        return $this->account->setId($userId)->update([
+            Config::getTwoFactorSecretColumn() => null,
+            Config::getTwoFactorProviderColumn() => null,
+        ]);
     }
 
     /**
@@ -707,13 +701,10 @@ class Account
      */
     public function updateOAuthData(int $accountId, string $oauthId, string $oauthProvider): bool
     {
-        return $this->account->updateByConditions(
-            [
-                Config::getOAuthColumn('id') => $oauthId,
-                Config::getOAuthColumn('provider') => $oauthProvider,
-            ],
-            [Config::getColumn('id') => $accountId]
-        );
+        return $this->account->setId($accountId)->update([
+            Config::getOAuthColumn('id') => $oauthId,
+            Config::getOAuthColumn('provider') => $oauthProvider,
+        ]);
     }
 
     /**

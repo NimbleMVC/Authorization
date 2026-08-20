@@ -68,4 +68,24 @@ final class TOTPProviderTest extends TestCase
             )
         );
     }
+
+    /**
+     * AUT-H07 regression guard: the provider must never expose a method that
+     * ships the TOTP secret to a third-party QR rendering service again.
+     */
+    public function testProviderExposesNoRemoteQrCodeRenderingMethod(): void
+    {
+        self::assertFalse(method_exists($this->provider, 'getQRCodeImageURL'));
+    }
+
+    public function testQrCodeUriIsLocalOtpauthWithNoExternalHost(): void
+    {
+        $secret = $this->provider->generateSecret();
+        $uri = $this->provider->getQRCodeURI($secret, 'alice@example.com');
+
+        self::assertStringStartsWith('otpauth://totp/', $uri);
+        self::assertStringContainsString('secret=' . $secret, $uri);
+        self::assertStringNotContainsString('http://', $uri);
+        self::assertStringNotContainsString('https://', $uri);
+    }
 }
