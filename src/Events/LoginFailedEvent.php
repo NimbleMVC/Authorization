@@ -20,6 +20,8 @@ class LoginFailedEvent extends AbstractEvent
     public const REASON_REJECTED = 'rejected';
     public const REASON_RATE_LIMITED = 'rate_limited';
     public const REASON_INVALID_TWO_FACTOR = 'invalid_two_factor';
+    public const REASON_TWO_FACTOR_EXPIRED = 'two_factor_expired';
+    public const REASON_TWO_FACTOR_RATE_LIMITED = 'two_factor_rate_limited';
 
     /**
      * @param string $login Login identifier used (username or email)
