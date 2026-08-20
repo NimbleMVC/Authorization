@@ -329,8 +329,7 @@ class Authorization
         if (!empty($secret) && !empty($provider)) {
             // User has 2FA enabled - store user ID temporarily and throw exception
             $userId = (int)$account[$tableName][Config::getColumn('id')];
-            $this->session->set(Config::$twoFactorSessionKey, $userId);
-            $this->session->set(Config::$twoFactorProviderSessionKey, $provider);
+            $this->startTwoFactorChallenge($userId, $provider);
             throw new PendingTwoFactorException($userId, $provider, Translation::getInstance()->translate('module.authorization.validation.two_factor_required'));
         }
 
@@ -534,10 +533,34 @@ class Authorization
     {
         $this->session->remove(Config::$sessionKey);
         $this->session->remove(Config::$authEpochSessionKey);
-        $this->session->remove(Config::$twoFactorSessionKey);
-        $this->session->remove(Config::$twoFactorProviderSessionKey);
+        $this->clearTwoFactorChallenge();
         $this->session->remove(Config::$challengeSessionKey);
         $this->session->remove(Config::$challengeNameSessionKey);
+    }
+
+    /**
+     * Start a pending 2FA challenge, stamping its creation time so
+     * verifyTwoFactorCode() can enforce a TTL (AUT-M01).
+     */
+    private function startTwoFactorChallenge(int $userId, string $providerName): void
+    {
+        $this->session->set(Config::$twoFactorSessionKey, $userId);
+        $this->session->set(Config::$twoFactorProviderSessionKey, $providerName);
+        $this->session->set(Config::$twoFactorChallengeStartedAtSessionKey, time());
+    }
+
+    /** Remove pending 2FA challenge state, including the AUT-M01 TTL bookkeeping key. */
+    private function clearTwoFactorChallenge(): void
+    {
+        $this->session->remove(Config::$twoFactorSessionKey);
+        $this->session->remove(Config::$twoFactorProviderSessionKey);
+        $this->session->remove(Config::$twoFactorChallengeStartedAtSessionKey);
+    }
+
+    /** Persistent, per-account rate-limit identifier for 2FA code guesses (AUT-M01). */
+    private function twoFactorRateLimitIdentifier(int $userId): string
+    {
+        return '2fa:' . $userId;
     }
 
     /**
@@ -612,8 +635,7 @@ class Authorization
 
         $this->session->remove(Config::$sessionKey);
         $this->session->remove(Config::$authEpochSessionKey);
-        $this->session->remove(Config::$twoFactorSessionKey);
-        $this->session->remove(Config::$twoFactorProviderSessionKey);
+        $this->clearTwoFactorChallenge();
         $this->abortChallenge();
 
         if (Config::$rememberMeEnabled) {
@@ -675,7 +697,8 @@ class Authorization
      * @param string $code The 2FA code to verify
      * @param string|null $userId Optional user ID if verifying for a specific user
      * @return bool True if 2FA code is valid and user is authenticated
-     * @throws TwoFactorException If code is invalid or expired
+     * @throws TwoFactorException If code is invalid or the pending challenge expired
+     * @throws RateLimitExceededException If too many wrong codes were tried (AUT-M01)
      * @throws InvalidArgumentException If no pending 2FA verification
      * @throws DatabaseManagerException
      */
@@ -686,8 +709,31 @@ class Authorization
             throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth.no_pending_2fa'));
         }
 
-        $pendingUserId = $this->session->get(Config::$twoFactorSessionKey);
+        $pendingUserId = (int)$this->session->get(Config::$twoFactorSessionKey);
         $providerName = $this->session->get(Config::$twoFactorProviderSessionKey);
+        $startedAt = $this->session->get(Config::$twoFactorChallengeStartedAtSessionKey);
+
+        // AUT-M01: a pending challenge with no (or an expired) TTL marker must
+        // not be accepted indefinitely.
+        if (!is_int($startedAt) || (time() - $startedAt) > Config::getTwoFactorChallengeLifetime()) {
+            $this->clearTwoFactorChallenge();
+            Kernel::dispatchEvent(new LoginFailedEvent((string)$pendingUserId, LoginFailedEvent::REASON_TWO_FACTOR_EXPIRED));
+            throw new TwoFactorException(Translation::getInstance()->translate('module.authorization.validation.invalid_2fa_code'));
+        }
+
+        $rateLimitIdentifier = $this->twoFactorRateLimitIdentifier($pendingUserId);
+
+        // AUT-M01: a locked-out challenge must not be accepted, correct password
+        // notwithstanding - this is tracked independently of the login rate limiter.
+        if (Config::isRateLimitEnabled() && $this->rateLimiter->isRateLimited($rateLimitIdentifier)) {
+            $remaining = $this->rateLimiter->getLockoutTimeRemaining($rateLimitIdentifier);
+            $this->clearTwoFactorChallenge();
+            Kernel::dispatchEvent(new LoginFailedEvent((string)$pendingUserId, LoginFailedEvent::REASON_TWO_FACTOR_RATE_LIMITED));
+            throw new RateLimitExceededException(
+                Translation::getInstance()->translate('module.authorization.validation.two_factor_rate_limit_exceeded', ['seconds' => $remaining]),
+                $remaining
+            );
+        }
 
         // Verify the user ID matches if provided
         if ($userId !== null && (int)$userId !== $pendingUserId) {
@@ -705,32 +751,48 @@ class Authorization
         $userAccount = $this->account->getAccount();
 
         if (!$userAccount) {
-            $this->session->remove(Config::$twoFactorSessionKey);
-            $this->session->remove(Config::$twoFactorProviderSessionKey);
+            $this->clearTwoFactorChallenge();
             throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth.user_not_found'));
         }
 
         $secret = $userAccount[Config::$tableName][Config::getTwoFactorSecretColumn()] ?? null;
 
         if (!$secret) {
-            $this->session->remove(Config::$twoFactorSessionKey);
-            $this->session->remove(Config::$twoFactorProviderSessionKey);
+            $this->clearTwoFactorChallenge();
             throw new InvalidArgumentException(Translation::getInstance()->translate('module.authorization.auth.2fa_not_enabled'));
         }
 
         // Verify the code
         if (!$provider->verify($secret, $code)) {
             // Recovery codes are account-bound hashes and are consumed atomically.
-            if (!$this->recoveryCodeService->consume((int)$pendingUserId, $code)) {
+            if (!$this->recoveryCodeService->consume($pendingUserId, $code)) {
+                if (Config::isRateLimitEnabled()) {
+                    $this->rateLimiter->recordFailedAttempt(
+                        $rateLimitIdentifier,
+                        Config::getTwoFactorMaxAttempts(),
+                        Config::getTwoFactorLockoutDuration()
+                    );
+
+                    // AUT-M01: clear the pending state as soon as the limit is
+                    // crossed instead of waiting for the next attempt.
+                    if ($this->rateLimiter->isRateLimited($rateLimitIdentifier)) {
+                        $this->clearTwoFactorChallenge();
+                    }
+                }
+
                 Kernel::dispatchEvent(new LoginFailedEvent((string)$pendingUserId, LoginFailedEvent::REASON_INVALID_TWO_FACTOR, $userAccount));
                 throw new TwoFactorException(Translation::getInstance()->translate('module.authorization.validation.invalid_2fa_code'));
             }
         }
 
         // Code verified successfully - complete the login
-        $this->completeLogin((int)$pendingUserId, $userAccount, LoginSuccessEvent::METHOD_TWO_FACTOR);
-        $this->session->remove(Config::$twoFactorSessionKey);
-        $this->session->remove(Config::$twoFactorProviderSessionKey);
+        $this->completeLogin($pendingUserId, $userAccount, LoginSuccessEvent::METHOD_TWO_FACTOR);
+
+        if (Config::isRateLimitEnabled()) {
+            $this->rateLimiter->clearAttempts($rateLimitIdentifier);
+        }
+
+        $this->clearTwoFactorChallenge();
 
         return true;
     }
@@ -859,8 +921,7 @@ class Authorization
                 $evidence
             ),
             function () use ($userId, $providerName): void {
-                $this->session->set(Config::$twoFactorSessionKey, $userId);
-                $this->session->set(Config::$twoFactorProviderSessionKey, $providerName);
+                $this->startTwoFactorChallenge($userId, $providerName);
             }
         );
     }

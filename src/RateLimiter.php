@@ -54,15 +54,17 @@ class RateLimiter
     }
 
     /**
-     * Record a failed login attempt (for the identifier and, if enabled, the client IP)
+     * Record a failed attempt (for the identifier and, if enabled, the client IP)
      *
-     * @param string $identifier Username or email
+     * @param string $identifier Username, email, or any other tracked identifier
+     * @param int|null $maxAttempts Override Config::getRateLimitMaxAttempts() (e.g. for a non-login use)
+     * @param int|null $lockoutDuration Override Config::getRateLimitLockoutDuration()
      * @return void
      */
-    public function recordFailedAttempt(string $identifier): void
+    public function recordFailedAttempt(string $identifier, ?int $maxAttempts = null, ?int $lockoutDuration = null): void
     {
-        $maxAttempts = Config::getRateLimitMaxAttempts();
-        $lockoutDuration = Config::getRateLimitLockoutDuration();
+        $maxAttempts ??= Config::getRateLimitMaxAttempts();
+        $lockoutDuration ??= Config::getRateLimitLockoutDuration();
         $now = time();
 
         foreach ($this->getKeys($identifier) as $key) {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace NimblePHP\Authorization\Tests\Integration;
 
+use krzysztofzylka\DatabaseManager\Cache;
 use krzysztofzylka\DatabaseManager\DatabaseConnect;
 use krzysztofzylka\DatabaseManager\DatabaseManager;
 use krzysztofzylka\DatabaseManager\Enum\DatabaseType;
@@ -34,6 +35,7 @@ final class AuthorizationTwoFactorEnrollmentTest extends TestCase
     {
         $_SESSION = [];
         $_COOKIE = [];
+        Cache::clearAllCache();
         Kernel::$projectPath = dirname(__DIR__, 2);
         Kernel::$middlewareManager = new MiddlewareManager();
         Kernel::$serviceContainer = ServiceContainer::getInstance();
@@ -94,6 +96,21 @@ final class AuthorizationTwoFactorEnrollmentTest extends TestCase
         $_SESSION[Config::$authEpochSessionKey] = 0;
 
         $this->authorization = new Authorization();
+    }
+
+    protected function tearDown(): void
+    {
+        $_SESSION = [];
+        $_COOKIE = [];
+        Config::$tableName = 'accounts';
+        Config::$columns = [
+            'id' => 'id', 'username' => 'username', 'email' => 'email',
+            'password' => 'password', 'active' => 'active',
+            'auth_epoch' => 'auth_epoch', 'created_at' => 'date_created',
+        ];
+        Config::$sessionKey = 'account_id';
+        Config::$authEpochSessionKey = 'account_auth_epoch';
+        Config::$recoveryCodeTableName = 'account_two_factor_recovery_codes';
     }
 
     public function testEnrollmentNeverReturnsAQrCodeImageOrUrl(): void

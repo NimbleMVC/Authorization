@@ -58,6 +58,23 @@ $emailProvider->setEmailCallback(function($email, $code) {
 Config::registerTwoFactorProvider('email', $emailProvider);
 ```
 
+### 2. Limit prób i TTL pending state (AUT-M01)
+
+`verifyTwoFactorCode()` ma wbudowane, konfigurowalne progi - patrz
+[Bezpieczeństwo](#1-rate-limiting-jest-wbudowany-aut-m01) niżej po pełny opis:
+
+```php
+Config::$twoFactorChallengeLifetime = 300;  // TTL pending state, sekundy (domyślnie: 300)
+Config::$twoFactorMaxAttempts = 5;          // Błędnych kodów przed blokadą (domyślnie: 5)
+Config::$twoFactorLockoutDuration = 300;    // Czas blokady, sekundy (domyślnie: 300)
+```
+
+```env
+AUTHORIZATION_TWO_FACTOR_CHALLENGE_LIFETIME=300
+AUTHORIZATION_TWO_FACTOR_MAX_ATTEMPTS=5
+AUTHORIZATION_TWO_FACTOR_LOCKOUT_DURATION=300
+```
+
 ### 2. Baza danych
 
 Migracja automatycznie dodaje kolumny:
@@ -411,39 +428,47 @@ $recoveryCodes = $auth->regenerateRecoveryCodes();
 
 ### Najlepsze praktyki
 
-#### 1. Szanuj rate limiting
+#### 1. Rate limiting jest wbudowany (AUT-M01)
 
-Wbudowany limiter chroni wyłącznie `Authorization::login()` (pierwszy
-składnik). `verifyTwoFactorCode()` nie sprawdza ani nie zwiększa jego licznika,
-a pending state 2FA nie ma obecnie własnego TTL. Dodaj osobny limiter przed
-wywołaniem weryfikacji, przykładowo:
+`verifyTwoFactorCode()` egzekwuje to samodzielnie, niezależnie od limitera
+logowania (który poprawne hasło i tak czyści przed dotarciem do 2FA):
+
+- **TTL pending state**: challenge utworzony przez `login()` lub
+  `createPendingTwoFactorState()` wygasa po
+  `Config::$twoFactorChallengeLifetime` sekundach (domyślnie 300 = 5 minut).
+  Po wygaśnięciu `verifyTwoFactorCode()` rzuca `TwoFactorException` i czyści
+  stan - trzeba zalogować się ponownie.
+- **Limit prób per konto** (+ per IP, gdy `Config::$rateLimitTrackIp = true`):
+  `Config::$twoFactorMaxAttempts` błędnych kodów (domyślnie 5, licząc też
+  nieudane próby recovery code) w oknie `Config::$twoFactorLockoutDuration`
+  (domyślnie 300s) blokuje weryfikację - `RateLimitExceededException`.
+  Licznik jest trwały (ta sama `RateLimiterStorage` co logowanie, domyślnie
+  baza danych) i przypisany do konta, więc **przetrwa nowy, poprawny login**
+  - to jest właśnie luka, którą AUT-M01 zamykał (poprawne hasło samo w sobie
+    już nie resetuje prób do 2FA).
+- Limit czyści bieżący pending state natychmiast po przekroczeniu progu, a
+  udana weryfikacja zeruje licznik prób dla konta.
 
 ```php
-use NimblePHP\Authorization\RateLimiter;
-
-$pendingAccountId = $auth->getPendingTwoFactorUserId();
-
-if ($pendingAccountId === null) {
-    http_response_code(401);
-    exit;
-}
-
-$limitKey = '2fa:' . $pendingAccountId;
-$limiter = new RateLimiter();
-
-if ($limiter->isRateLimited($limitKey)) {
-    http_response_code(429);
-    exit;
-}
+use NimblePHP\Authorization\Exceptions\RateLimitExceededException;
+use NimblePHP\Authorization\Exceptions\TwoFactorException;
 
 try {
-    $auth->verifyTwoFactorCode($_POST['2fa_code']);
-    $limiter->clearAttempts($limitKey);
-} catch (TwoFactorException $exception) {
-    $limiter->recordFailedAttempt($limitKey);
-    throw $exception;
+    $verified = $auth->verifyTwoFactorCode($_POST['2fa_code']);
+} catch (RateLimitExceededException $e) {
+    http_response_code(429);
+    exit;
+} catch (TwoFactorException $e) {
+    // Nieprawidłowy kod albo wygasły/nieistniejący pending state.
+    $error = "Nieprawidłowy kod: " . $e->getMessage();
 }
 ```
+
+Progi da się dostroić (`AUTHORIZATION_TWO_FACTOR_MAX_ATTEMPTS`,
+`AUTHORIZATION_TWO_FACTOR_LOCKOUT_DURATION`,
+`AUTHORIZATION_TWO_FACTOR_CHALLENGE_LIFETIME`), ale nie da się tego wyłączyć
+osobno od reszty rate limitingu - steruje tym globalne
+`Config::$rateLimitEnabled`/`AUTHORIZATION_RATE_LIMIT_ENABLED`.
 
 #### 2. Przechowuj sekrety bezpiecznie
 ```php
@@ -484,10 +509,13 @@ if ($auth->isAuthorized()) {
 ### Zabezpieczenia wymagane w aplikacji
 
 #### Brute Force
-- moduł nie ma wbudowanego limitu prób `verifyTwoFactorCode()`;
-- aplikacja musi dodać limit per pending konto/sesja i opcjonalnie IP;
-- aplikacja powinna nadać pending state krótki TTL i unieważniać go po limicie;
-- opóźnienia i blokady muszą być zaimplementowane poza providerem.
+- zamknięte w AUT-M01 (2026-08-20): `verifyTwoFactorCode()` ma wbudowany
+  limit prób per konto (+ opcjonalnie IP) i TTL pending state - patrz
+  [Rate limiting jest wbudowany](#1-rate-limiting-jest-wbudowany-aut-m01)
+  wyżej;
+- rekomendowane opóźnienia progresywne (exponential backoff) między próbami
+  nadal pozostają po stronie aplikacji - moduł tylko blokuje po przekroczeniu
+  stałego progu.
 
 #### Man-in-the-Middle
 - Zawsze używaj HTTPS

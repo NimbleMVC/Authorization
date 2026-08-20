@@ -270,6 +270,34 @@ class Config
     public static string $twoFactorProviderSessionKey = 'pending_2fa_provider';
 
     /**
+     * Session key for the pending 2FA state's creation time (AUT-M01 TTL)
+     * @var string
+     */
+    public static string $twoFactorChallengeStartedAtSessionKey = 'pending_2fa_started_at';
+
+    /**
+     * How long a pending 2FA challenge stays valid, in seconds (AUT-M01).
+     * A stale challenge is rejected and cleared instead of accepted indefinitely.
+     * @var int
+     */
+    public static int $twoFactorChallengeLifetime = 300; // 5 minutes
+
+    /**
+     * Maximum wrong-code attempts allowed against a single pending 2FA
+     * challenge before it is locked and cleared (AUT-M01). Tracked per
+     * account (and per client IP when $rateLimitTrackIp is true) using the
+     * same persistent RateLimiterStorage as login attempts.
+     * @var int
+     */
+    public static int $twoFactorMaxAttempts = 5;
+
+    /**
+     * Lockout duration after exceeding $twoFactorMaxAttempts, in seconds.
+     * @var int
+     */
+    public static int $twoFactorLockoutDuration = 300; // 5 minutes
+
+    /**
      * 2FA column names in the accounts table
      * @var array
      */
@@ -378,6 +406,9 @@ class Config
         self::$rateLimitTrackIp = filter_var($_ENV['AUTHORIZATION_RATE_LIMIT_TRACK_IP'] ?? false, FILTER_VALIDATE_BOOLEAN);
         self::$rateLimitTableName = $_ENV['AUTHORIZATION_RATE_LIMIT_TABLE'] ?? 'account_rate_limits';
         self::$apiKeyRateLimitEnforced = filter_var($_ENV['AUTHORIZATION_API_KEY_RATE_LIMIT_ENFORCED'] ?? true, FILTER_VALIDATE_BOOLEAN);
+        self::$twoFactorChallengeLifetime = (int)($_ENV['AUTHORIZATION_TWO_FACTOR_CHALLENGE_LIFETIME'] ?? 300);
+        self::$twoFactorMaxAttempts = (int)($_ENV['AUTHORIZATION_TWO_FACTOR_MAX_ATTEMPTS'] ?? 5);
+        self::$twoFactorLockoutDuration = (int)($_ENV['AUTHORIZATION_TWO_FACTOR_LOCKOUT_DURATION'] ?? 300);
 
         if (($_ENV['AUTHORIZATION_RATE_LIMIT_STORAGE'] ?? 'database') === 'session') {
             self::$rateLimiterStorage = new SessionRateLimiterStorage();
@@ -789,6 +820,33 @@ class Config
     public static function isApiKeyRateLimitEnforced(): bool
     {
         return self::$apiKeyRateLimitEnforced;
+    }
+
+    /**
+     * Get the TTL for a pending 2FA challenge, in seconds
+     * @return int
+     */
+    public static function getTwoFactorChallengeLifetime(): int
+    {
+        return self::$twoFactorChallengeLifetime;
+    }
+
+    /**
+     * Get the maximum wrong-code attempts allowed per pending 2FA challenge
+     * @return int
+     */
+    public static function getTwoFactorMaxAttempts(): int
+    {
+        return self::$twoFactorMaxAttempts;
+    }
+
+    /**
+     * Get the lockout duration after exceeding the 2FA attempt limit, in seconds
+     * @return int
+     */
+    public static function getTwoFactorLockoutDuration(): int
+    {
+        return self::$twoFactorLockoutDuration;
     }
 
     /**

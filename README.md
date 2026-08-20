@@ -84,8 +84,10 @@ composer require nimblephp/authorization
 
 Biblioteka zawiera wbudowaną ochronę przed atakami brute-force na logowanie
 hasłem. System śledzi nieudane próby pierwszego składnika według identyfikatora
-i opcjonalnie IP. Nie obejmuje `verifyTwoFactorCode()`, OAuth ani uwierzytelniania
-tokenem; te wejścia wymagają osobnych limiterów w aplikacji.
+i opcjonalnie IP. `verifyTwoFactorCode()` ma od AUT-M01 własny, niezależny
+limit prób i TTL pending state (patrz [Dwuetapowa weryfikacja](#dwuetapowa-weryfikacja-2fa)
+niżej) - poprawne hasło czyści tylko limiter logowania, nie limiter 2FA. OAuth
+i uwierzytelnianie tokenem nadal wymagają osobnych limiterów w aplikacji.
 
 #### Konfiguracja Rate Limiting
 
@@ -328,11 +330,16 @@ try {
 // Na stronie weryfikacji 2FA:
 try {
     $verified = $auth->verifyTwoFactorCode($_POST['2fa_code']);
-    
+
     if ($verified) {
         echo "Zalogowano pomyślnie!";
     }
+} catch (RateLimitExceededException $e) {
+    // AUT-M01: osobny, per-konto limit prób 2FA - przetrwa nawet nowy,
+    // poprawny login (poprawne hasło czyści tylko limiter logowania).
+    echo "Zbyt wiele nieudanych prób 2FA. Spróbuj później.";
 } catch (TwoFactorException $e) {
+    // Nieprawidłowy kod albo wygasły/nieistniejący pending state (TTL).
     echo "Nieprawidłowy kod: " . $e->getMessage();
 }
 ```
