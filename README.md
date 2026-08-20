@@ -274,20 +274,24 @@ if ($auth->isAuthorized()) {
     // Pobierz TOTP provider
     $totp = Config::getTwoFactorProvider('totp');
     
-    // Włącz 2FA i zwróć informacje o QR kodzie
+    // Włącz 2FA (AUT-H07: nie zwraca obrazu/URL-a QR - wysłanie otpauth URI
+    // do zewnętrznej usługi renderującej ujawniłoby sekret TOTP)
     $result = $auth->enableTwoFactorAuth($totp);
-    
+
     echo "Secret: " . $result['secret'];
-    echo "QR Code URL: " . $result['qr_code'];
     echo "Provider: " . $result['provider'];
+
+    // QR generuj lokalnie z getQRCodeURI(), nigdy przez zewnętrzną usługę
+    $qrUri = $totp->getQRCodeURI($result['secret'], $userIdentifier);
 }
 ```
 
 **Wyświetlanie QR kodu dla użytkownika:**
 
 ```php
-// W szablonie HTML
-<img src="<?php echo htmlspecialchars($qrCodeUrl); ?>" alt="2FA QR Code">
+// $qrUri (otpauth://...) renderuj lokalną biblioteką, np. bacon/bacon-qr-code
+// (patrz TWO_FACTOR_AUTH.md), i osadź jako <img> wynikowy obraz/SVG - nie
+// przekazuj $qrUri do żadnej zewnętrznej usługi.
 <p>Skanuj kod QR za pomocą aplikacji authenticatora (Google Authenticator, Authy, itp.)</p>
 ```
 
