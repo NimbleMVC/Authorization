@@ -194,6 +194,14 @@ class Config
      */
     private static ?RateLimiterStorage $rateLimiterStorage = null;
 
+    /**
+     * Enforce APIKeyProvider's per-key rate limit (atomic, DB-backed).
+     * Disable only if the application already enforces its own atomic
+     * limiter and the migration adding rate_window_* columns cannot run.
+     * @var bool
+     */
+    public static bool $apiKeyRateLimitEnforced = true;
+
     // ===== Remember-Me Configuration =====
 
     /**
@@ -369,6 +377,7 @@ class Config
         self::$treatAjaxAsApi = filter_var($_ENV['AUTHORIZATION_TREAT_AJAX_AS_API'] ?? true, FILTER_VALIDATE_BOOLEAN);
         self::$rateLimitTrackIp = filter_var($_ENV['AUTHORIZATION_RATE_LIMIT_TRACK_IP'] ?? false, FILTER_VALIDATE_BOOLEAN);
         self::$rateLimitTableName = $_ENV['AUTHORIZATION_RATE_LIMIT_TABLE'] ?? 'account_rate_limits';
+        self::$apiKeyRateLimitEnforced = filter_var($_ENV['AUTHORIZATION_API_KEY_RATE_LIMIT_ENFORCED'] ?? true, FILTER_VALIDATE_BOOLEAN);
 
         if (($_ENV['AUTHORIZATION_RATE_LIMIT_STORAGE'] ?? 'database') === 'session') {
             self::$rateLimiterStorage = new SessionRateLimiterStorage();
@@ -771,6 +780,15 @@ class Config
     public static function getRateLimitLockoutDuration(): int
     {
         return self::$rateLimitLockoutDuration;
+    }
+
+    /**
+     * Check if APIKeyProvider must enforce the per-key rate limit
+     * @return bool
+     */
+    public static function isApiKeyRateLimitEnforced(): bool
+    {
+        return self::$apiKeyRateLimitEnforced;
     }
 
     /**

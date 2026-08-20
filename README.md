@@ -1627,8 +1627,11 @@ zostać ponownie użyty.
 ### API Keys
 
 Stacjonarne klucze API z walidacją, wygaśnięciem, revocation i rejestrowaniem
-użycia. Pola `scopes` oraz `rate_limit` są metadanymi — provider sam nie
-odrzuca żądania bez scope i nie zwraca 429 po przekroczeniu limitu.
+użycia. Pole `rate_limit` jest egzekwowane atomowo przez
+`validateToken()` (429 po przekroczeniu, wyłączalne przez
+`Config::$apiKeyRateLimitEnforced`). `scopes` pozostaje metadaną — moduł nie
+zna mapowania endpoint → scope, więc aplikacja musi je sprawdzić sama, np.
+przez `APIKeyProvider::hasScope()`/`requireScope()`.
 
 #### Konfiguracja
 
@@ -1666,16 +1669,16 @@ echo $apiKey;  // sk_abcdef1234567890...
 $auth = new Authorization();
 
 try {
+    $provider = $auth->getTokenProvider('api_key');
     $keyData = $auth->validateToken($apiKey, 'api_key');
     $userId = $keyData['user_id'];
-    $scopes = $keyData['scopes'];
 
-    // Egzekwowanie scope należy do aplikacji.
-    if (!in_array('read:users', $scopes, true)) {
-        http_response_code(403);
-        exit;
-    }
-    
+    // Egzekwowanie scope należy do aplikacji - moduł nie zna wymaganego
+    // scope per endpoint.
+    $provider->requireScope($keyData, 'read:users');
+
+} catch (RateLimitExceededException $e) {
+    http_response_code(429);
 } catch (Exception $e) {
     http_response_code(401);
 }
@@ -1710,26 +1713,33 @@ $auth->revokeToken($apiKey, 'api_key');
 
 #### Rate Limiting
 
-`getRateLimit()` wyłącznie raportuje licznik użyć z ostatniej godziny. Nie
-blokuje klucza i nie jest automatycznie wywoływane przez middleware modułu.
-Poniższa decyzja 429 jest przykładem kodu aplikacji, nie zabezpieczeniem
-wbudowanym w `APIKeyProvider`.
+`APIKeyProvider::validateToken()` (i więc `Authorization::validateToken()`)
+egzekwuje `rate_limit` klucza atomowo w oknie 1h i rzuca
+`RateLimitExceededException`, gdy limit jest przekroczony - klucz nie zostaje
+uwierzytelniony. `getRateLimit()` jest osobnym, tylko-do-odczytu raportem
+bieżącego stanu okna (nie zużywa żądania z limitu), przydatnym np. do nagłówków
+`X-RateLimit-*`:
 
 ```php
+use NimblePHP\Authorization\Exceptions\RateLimitExceededException;
+
 $provider = $auth->getTokenProvider('api_key');
 
-$rateLimit = $provider->getRateLimit($apiKey);
-
-// Odpowiedź
-header('X-RateLimit-Limit: ' . $rateLimit['limit']);
-header('X-RateLimit-Used: ' . $rateLimit['used']);
-header('X-RateLimit-Remaining: ' . $rateLimit['remaining']);
-
-if ($rateLimit['remaining'] <= 0) {
+try {
+    $auth->validateToken($apiKey, 'api_key');
+} catch (RateLimitExceededException $e) {
+    $rateLimit = $provider->getRateLimit($apiKey);
+    header('X-RateLimit-Limit: ' . $rateLimit['limit']);
+    header('X-RateLimit-Remaining: ' . $rateLimit['remaining']);
     http_response_code(429);
     echo json_encode(['error' => 'Rate limit exceeded']);
+    exit;
 }
 ```
+
+Wbudowane egzekwowanie można wyłączyć (`Config::$apiKeyRateLimitEnforced =
+false`) dla aplikacji z własnym atomowym limiterem; patrz
+[JWT_API_KEYS.md](JWT_API_KEYS.md#wyłączenie-wbudowanego-egzekwowania).
 
 ## Dokumentacja
 
