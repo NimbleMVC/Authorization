@@ -104,6 +104,16 @@ Config::$rateLimitMaxAttempts = 5;
 Config::$rateLimitLockoutDuration = 900;
 ```
 
+Domyślny magazyn (`DatabaseRateLimiterStorage`) egzekwuje licznik atomowym
+UPSERT-em (AUT-M04) - równoległe żądania nie mogą wyścigowo ominąć limitu.
+Brak tabeli `account_rate_limits` **nie** powoduje już cichego przejścia na
+słabszy licznik sesyjny (który atakujący resetuje kasując ciasteczko) -
+domyślnie rzuca wyjątkiem. Jeśli to świadomy wybór dla danego środowiska:
+
+```php
+Config::$rateLimitAllowSessionFallback = true; // AUTHORIZATION_RATE_LIMIT_ALLOW_SESSION_FALLBACK
+```
+
 #### Obsługiwanie excepcji Rate Limiting
 
 ```php

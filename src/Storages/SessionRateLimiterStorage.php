@@ -79,6 +79,38 @@ class SessionRateLimiterStorage implements RateLimiterStorage
     }
 
     /**
+     * Best-effort: PHP's session write-lock already serializes requests from
+     * the same session, so this is atomic enough for the single-browser
+     * scope this backend documents - it never protects against an attacker
+     * dropping the cookie regardless.
+     *
+     * @param string $identifier
+     * @param int $now
+     * @param int $maxAttempts
+     * @param int $lockoutDuration
+     * @return array
+     */
+    public function increment(string $identifier, int $now, int $maxAttempts, int $lockoutDuration): array
+    {
+        $data = $this->get($identifier) ?? ['attempts' => 0, 'first_attempt' => $now, 'locked_until' => null];
+
+        if (empty($data['locked_until']) && isset($data['last_attempt']) && ($now - (int)$data['last_attempt']) > $lockoutDuration) {
+            $data = ['attempts' => 0, 'first_attempt' => $now, 'locked_until' => null];
+        }
+
+        $data['attempts']++;
+        $data['last_attempt'] = $now;
+
+        if ($data['attempts'] >= $maxAttempts && empty($data['locked_until'])) {
+            $data['locked_until'] = $now + $lockoutDuration;
+        }
+
+        $this->set($identifier, $data);
+
+        return $data;
+    }
+
+    /**
      * @param string $identifier
      * @return string
      */

@@ -189,6 +189,18 @@ class Config
     public static string $rateLimitTableName = 'account_rate_limits';
 
     /**
+     * Allow DatabaseRateLimiterStorage to silently downgrade to
+     * SessionRateLimiterStorage when its table is missing (AUT-M04).
+     *
+     * Off by default: a missing table now fails closed (throws) instead of
+     * silently serving brute-force protection an attacker can reset by
+     * dropping their cookie. Enable only for environments where that
+     * degraded fallback is an accepted, deliberate choice (e.g. local dev).
+     * @var bool
+     */
+    public static bool $rateLimitAllowSessionFallback = false;
+
+    /**
      * Rate limiter storage backend
      * @var RateLimiterStorage|null
      */
@@ -405,6 +417,7 @@ class Config
         self::$treatAjaxAsApi = filter_var($_ENV['AUTHORIZATION_TREAT_AJAX_AS_API'] ?? true, FILTER_VALIDATE_BOOLEAN);
         self::$rateLimitTrackIp = filter_var($_ENV['AUTHORIZATION_RATE_LIMIT_TRACK_IP'] ?? false, FILTER_VALIDATE_BOOLEAN);
         self::$rateLimitTableName = $_ENV['AUTHORIZATION_RATE_LIMIT_TABLE'] ?? 'account_rate_limits';
+        self::$rateLimitAllowSessionFallback = filter_var($_ENV['AUTHORIZATION_RATE_LIMIT_ALLOW_SESSION_FALLBACK'] ?? false, FILTER_VALIDATE_BOOLEAN);
         self::$apiKeyRateLimitEnforced = filter_var($_ENV['AUTHORIZATION_API_KEY_RATE_LIMIT_ENFORCED'] ?? true, FILTER_VALIDATE_BOOLEAN);
         self::$twoFactorChallengeLifetime = (int)($_ENV['AUTHORIZATION_TWO_FACTOR_CHALLENGE_LIFETIME'] ?? 300);
         self::$twoFactorMaxAttempts = (int)($_ENV['AUTHORIZATION_TWO_FACTOR_MAX_ATTEMPTS'] ?? 5);

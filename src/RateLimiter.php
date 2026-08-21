@@ -68,32 +68,14 @@ class RateLimiter
         $now = time();
 
         foreach ($this->getKeys($identifier) as $key) {
-            $data = $this->storage->get($key) ?? [
-                'attempts' => 0,
-                'first_attempt' => $now,
-                'locked_until' => null
-            ];
+            // AUT-M04: this read is only used for the "just crossed the
+            // threshold" telemetry heuristic below - the counter itself is
+            // updated atomically by increment(), so a race here cannot let
+            // an attempt slip past $maxAttempts uncounted.
+            $before = $this->storage->get($key);
+            $wasLocked = $before !== null && !empty($before['locked_until']) && (int)$before['locked_until'] >= $now;
 
-            // Forget stale counters (observation window = lockout duration)
-            if (empty($data['locked_until']) && isset($data['last_attempt']) && ($now - (int)$data['last_attempt']) > $lockoutDuration) {
-                $data = [
-                    'attempts' => 0,
-                    'first_attempt' => $now,
-                    'locked_until' => null
-                ];
-            }
-
-            $data['attempts']++;
-            $data['last_attempt'] = $now;
-
-            // Check if max attempts exceeded
-            $wasLocked = !empty($data['locked_until']);
-
-            if ($data['attempts'] >= $maxAttempts) {
-                $data['locked_until'] = $now + $lockoutDuration;
-            }
-
-            $this->storage->set($key, $data);
+            $data = $this->storage->increment($key, $now, $maxAttempts, $lockoutDuration);
 
             if (!$wasLocked && !empty($data['locked_until'])) {
                 Kernel::dispatchEvent(new RateLimitLockedEvent($key, (int)$data['locked_until']));
