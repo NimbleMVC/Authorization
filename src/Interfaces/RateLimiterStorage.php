@@ -42,4 +42,21 @@ interface RateLimiterStorage
      */
     public function removeAll(): void;
 
+    /**
+     * Atomically record one more attempt for identifier (AUT-M04).
+     *
+     * Implementations must apply the read-modify-write (stale window reset,
+     * attempts increment, locked_until threshold) as a single atomic
+     * operation so concurrent callers cannot race past $maxAttempts the way
+     * a separate get()-then-set() would.
+     *
+     * @param string $identifier
+     * @param int $now Current unix time
+     * @param int $maxAttempts Attempts allowed before locking
+     * @param int $lockoutDuration Lockout duration in seconds; also the
+     *        observation window after which a stale counter resets
+     * @return array Resulting row, same shape as get(): attempts, first_attempt, last_attempt, locked_until
+     */
+    public function increment(string $identifier, int $now, int $maxAttempts, int $lockoutDuration): array;
+
 }
